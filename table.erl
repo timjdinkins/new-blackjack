@@ -1,15 +1,14 @@
 -module(table).
 -behavior(gen_fsm).
 
--include("player.hrl").
 -record(game, {pid=null, players=dict:new()}).
 
--export([start/0, start_link/0, init/1, stop/1, terminate/2]).
--export([handle_event/3]).
+-export([start/0, start_link/0, init/1, stop/1, terminate/3]).
+-export([handle_event/3, handle_sync_event/4]).
 
--export([empty_table/2, playing/2]).
+-export([empty_table/3, playing/2, playing/3]).
 
--export([join/3, players/1, open_seats/1]).
+-export([seat/3, open_seats/1]).
 
 start() ->
 	gen_fsm:start(?MODULE, [], []).
@@ -24,7 +23,7 @@ init([]) ->
 	{ok, GamePid} = game:start_link(),
 	{ok, empty_table, #game{pid=GamePid}}.
 
-terminate(_Reason, #game{pid=Pid}) ->
+terminate(_Reason, _StateName, #game{pid=Pid}) ->
 	game:stop(Pid),
 	ok.
 
@@ -32,45 +31,41 @@ terminate(_Reason, #game{pid=Pid}) ->
 %%%%%%% Public API %%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-join(Pid, Seat, Player) ->
-	gen_fsm:call(Pid, {add_player, Seat, Player}).
+seat(Pid, Seat, Player) ->
+	gen_fsm:sync_send_event(Pid, {seat_player, Seat, Player}).
 
-players(Pid) ->
-	gen_fsm:call(Pid, print_players).
+bet(Pid, Seat, Amt)
 
 open_seats(Pid) ->
-	gen_fsm:call(Pid, open_seats).
+	gen_fsm:sync_send_all_state_event(Pid, open_seats).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%% Callbacks %%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
-empty_table({add_player, Seat, Player}, #game{pid=Pid, players=Players}=Game) ->
+empty_table({seat_player, Seat, Player}, _From, #game{pid=Pid, players=Players}=Game) ->
 	NewPlayers = dict:store(Seat, Player, Players),
 	NewGame = Game#game{players=NewPlayers},
-	ok = game:start_game(Pid, NewPlayers),
+	ok = game:start_hand(Pid, NewPlayers),
 	{reply, {ok, seated}, playing, NewGame}.
 	
-playing({add_player, Seat, Player}, #game{players=Players}=Game) ->
+playing({seat_player, Seat, Player}, _From, #game{players=Players}=Game) ->
 	case seat_available(Seat, Players) of
 		true -> 
 			NewPlayers = dict:store(Seat, Player, Players),
-			{reply, playing, {ok, seated}, Game#game{players=NewPlayers}};
+			{reply, {ok, seated}, playing, Game#game{players=NewPlayers}};
 		false ->
 			{reply, {error, seat_taken}, playing, Game}
-	end;
+	end.
 
 playing({game_complete, Players, Quiters}, #game{pid=Pid}=Game) ->
 	NewPlayers = remove_quiters(Players, Quiters),
-	ok = game:start_game(Pid, NewPlayers),
+	ok = game:start_hand(Pid, NewPlayers),
 	{next_state, playing, Game#game{players=NewPlayers}}.
 
-handle_event(print_players, StateName, #game{players=Players}=Game) ->
+handle_sync_event(print_players, _From, StateName, #game{players=Players}=Game) ->
 	io:format("~p~n", [Players]),
-	{next_state, StateName, Game};
-
-handle_event(open_seats, StateName, #game{players=Players}=Game) ->
-	{reply, {ok, find_open_seats(Players)}, StateName, Game};
+	{next_state, StateName, Game}.
 
 handle_event(stop, _StateName, #game{pid=Pid, players=_Players}=Game) ->
 	%% Tell the players we stopped this table
@@ -85,7 +80,7 @@ seat_available(Seat, Players) ->
 	lists:member(find_open_seats(Players), Seat).
 
 find_open_seats(Players) ->
-	Seats = dict:keys(Players),
+	Seats = dict:fetch_keys(Players),
 	Possible = [seat1, seat2, seat3, seat4, seat5, seat6],
 	lists:subtract(Possible, Seats).
 

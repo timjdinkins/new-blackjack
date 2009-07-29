@@ -3,7 +3,7 @@
 
 -export([start/0, start_link/0, init/1, stop/0, terminate/2]).
 -export([handle_call/3, handle_cast/2]).
--export([seat/1]).
+-export([find_table/0]).
 
 start() ->
 	gen_server:start({local, ?MODULE}, ?MODULE, [], []).
@@ -20,18 +20,16 @@ terminate(_Reason, _LoopData) ->
 	ok.
 
 %% Public API
-seat(Player) ->
-	gen_server:call(?MODULE, {seat, Player}).
+find_table() ->
+	gen_server:call(?MODULE, find_table).
 
 %% Callbacks
-handle_call({seat, Player}, _From, Tables) ->
+handle_call(find_table, _From, Tables) ->
 	case Tables of
 		[] ->
 			{ok, TablePid} = table:start_link(),
-			ok = table:join(TablePid, Player),
 			{reply, {table, TablePid}, [TablePid]};
 		[TablePid] ->
-			ok = table:join(TablePid, Player),
 			{reply, {table, TablePid}, [TablePid]}
 	end.
 

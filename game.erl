@@ -1,14 +1,14 @@
 -module(game).
 -behavior(gen_fsm).
 
--include("player.hrl").
+-record(seat, {pid, cards, bet=0}).
 
 -export([start/0, start_link/0, init/1, stop/1, terminate/3]).
 -export([handle_event/3]).
 
 -export([waiting/2, betting/2, dealing/2, playing_hands/2]).
 
--export([start_game/1, stop_game/1]).
+-export([start_hand/2, stop_hand/1, notify_players/2]).
 
 start() ->
 	gen_fsm:start(?MODULE, [], []).
@@ -21,7 +21,7 @@ stop(Pid) ->
 
 init([]) ->
 	{ok, Timer} = game_timer:start_link(),
-	{ok, waiting, {Timer, players, bets}}.
+	{ok, waiting, {Timer, seats}}.
 
 terminate(_Reason, _StateName, _Timer) ->
 	io:format("Terminating!~n", []),
@@ -33,7 +33,8 @@ terminate(_Reason, _StateName, _Timer) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 start_hand(Pid, Players) ->
-	gen_fsm:send_event(Pid, {start_hand, Players}).
+	{ok, Seats} = setup_seats(dict:to_list(Players)),
+	gen_fsm:send_event(Pid, {start_hand, Seats}).
 
 stop_hand(Pid) ->
 	gen_fsm:send_all_state_event(Pid, stop_hand).
@@ -42,24 +43,25 @@ stop_hand(Pid) ->
 %%%%%%%% Callbacks %%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-waiting({start_hand, Players}, {Timer, players, bets}) ->
-	notify_players("Starting a new game", dict:to_list(Players)),
+waiting({start_hand, Seats}, {Timer, seats}) ->
+	ok = notify_players("Starting a new game", Seats),
 	send_self(0, start_betting, Timer),
-	Bets = create_bets(dict:to_list(Players)),
-	{next_state, betting, {Timer, Players, Bets}}.
+	{next_state, betting, {Timer, Seats}}.
 
-betting(start_betting, {Timer, Players}) ->
-	notify_players("Place your bets", Players),
+betting(start_betting, {Timer, Seats}) ->
+	ok = notify_players("Place your bets", Seats),
 	send_self(10, end_betting, Timer),
-	{next_state, betting, {Timer, Players}};
+	{next_state, betting, {Timer, Seats}};
 
-betting({place_bet, Seat, Amt}, {Timer, Players}) ->
-	{next_state, betting, {Timer, Players}}
+betting({place_bet, Seat, Amt}, {Timer, Seats}) ->
+	{ok, SeatN} = dict:find(Seat, Seats),
+	NewSeats = dict:store(Seat, SeatN#seat{bet=Amt}),
+	{next_state, betting, {Timer, NewSeats}};
 
-betting(end_betting, [Timer]) ->
+betting(end_betting, {Timer, Seats}) ->
 	io:format("Betting is closed, dealing cards now.~n", []),
 	send_self(0, start_dealing, Timer),
-	{next_state, dealing, [Timer]}.
+	{next_state, dealing, {Timer, Seats}}.
 
 dealing(start_dealing, [Timer]) ->
 	io:format("Dealing the cards.~n", []),
@@ -89,17 +91,20 @@ handle_event(stop, _StateName, Timer) ->
 
 send_self(Secs, Msg, Timer) ->
 	MyPid = self(),
-	ok = test_timer:set_timeout(Timer, {Secs, fun() -> gen_fsm:send_event(MyPid, Msg) end}).
+	ok = game_timer:set_timeout(Timer, {Secs, fun() -> gen_fsm:send_event(MyPid, Msg) end}).
 
-notify_players(Msg, []) -> ok;
-notify_players(Msg, [{_Seat,#player{pid=Pid}}|Players]) ->
-	player:notify(Pid, Pid),
-	notify_players(Players).
+notify_players(Msg, Dict) ->
+	do_notify(Msg, dict:to_list(Dict)).
 
-create_bets([{Seat, _Player}Players]) ->
-	Bets = dict:new(),
-	create_bets(Players, dict:store(Seat, 0, Bets)).
-create_bets([], Bets) ->
-	Bets;
-create_bets([{Seat, _Player}, Players], Bets) ->
-	create_bets(Players, dict:store(Seat, 0, Bets)).
+do_notify(_Msg, []) -> ok;
+do_notify(Msg, [{_Seat,#seat{pid=Pid}}|Seats]) ->
+	player:notify(Pid, Msg),
+	do_notify(Msg, Seats).
+
+setup_seats([{Seat, Pid}|Players]) ->
+	Seats = dict:new(),
+	setup_seats(Players, dict:store(Seat, #seat{pid=Pid}, Seats)).
+setup_seats([], Seats) ->
+	{ok, Seats};
+setup_seats([{Seat, Pid}|Players], Seats) ->
+	setup_seats(Players, dict:store(Seat, #seat{pid=Pid}, Seats)).

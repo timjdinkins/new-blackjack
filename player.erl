@@ -6,7 +6,7 @@
 -export([start/2, start_link/2, init/1, stop/1, terminate/2]).
 -export([handle_call/3, handle_cast/2]).
 
--export([join_table/1, starting_game/1, table_pid/1]).
+-export([find_table/1, table_pid/1, join_table/2, place_bet/2, notify/2]).
 
 start(Name, Stack) ->
 	gen_server:start(?MODULE, [Name, Stack], []).
@@ -17,17 +17,20 @@ stop(Pid) ->
 	gen_server:cast(Pid, stop).
 
 init([Name, Stack]) ->
-	{ok, {table_pid, #player{name=Name,stack=Stack,pid=self()}}}.
+	{ok, {table_pid, seat, #player{name=Name,stack=Stack,pid=self()}}}.
 
 terminate(_Reason, _Game) ->
 	ok.
 
 %% Public API
-join_table(Pid) ->
-	gen_server:call(Pid, join_table).
+find_table(Pid) ->
+	gen_server:cast(Pid, find_table).
 
-starting_game(Pid) ->
-	gen_server:cast(Pid, starting_game).
+join_table(Pid, Seat) ->
+	gen_server:call(Pid, {join_table, Seat}).
+
+place_bet(Pid, Amt) ->
+	gen_server:call(Pid, {place_bet, Amt}).
 
 notify(Pid, Msg) ->
 	gen_server:cast(Pid, {notify, Msg}).
@@ -36,26 +39,27 @@ table_pid(Pid) ->
 	gen_server:call(Pid, table_pid).
 
 %% Callbacks
-handle_call(join_table, _From, {OldTablePid, Player}) ->
-	case casino:seat(Player) of
-		{table, TablePid} -> 
-			Msg = "Successfully joined the table";
-		_Error ->
-			Msg = "Something went wrong, try again!",
-			TablePid = OldTablePid
+handle_call({join_table, Seat}, _From, {TablePid, _Seat, Player}) ->
+	Message = case table:seat(TablePid, Seat, self()) of
+		{ok, seated} -> "Successfully joined the table";
+		{error, Msg} -> Msg
 	end,
-	{reply, Msg, {TablePid, Player}};
+	{reply, Message, {TablePid, Seat, Player}};
 
-handle_call(table_pid, _From, {TablePid, Player}) ->
-	{reply, TablePid, {TablePid, Player}}.
+handle_call({place_bet, Amt}, _From, {TablePid, Seat, Player}) ->
+	table:bet(TablePid, Seat, Amt),
+	{reply, ok, {TablePid, Seat, Player}};
 
-handle_cast(starting_game, Player) ->
-	io:format("Player ~p: the game is starting~n", [self()]),
-	{noreply, Player};
+handle_call(table_pid, _From, {TablePid, Seat, Player}) ->
+	{reply, TablePid, {TablePid, Seat, Player}}.
 
-handle_cast({notify, Msg}, Player) ->
+handle_cast(find_table, {_OldTablePid, _Seat, Player}) ->
+	{table, TablePid} = casino:find_table(),
+	{noreply, {TablePid, seat, Player}};
+
+handle_cast({notify, Msg}, State) ->
 	io:format("~p~n", [Msg]),
-	{noreply, Player};
+	{noreply, State};
 
-handle_cast(stop, LoopData) ->
-	{stop, normal, LoopData}.
+handle_cast(stop, State) ->
+	{stop, normal, State}.
