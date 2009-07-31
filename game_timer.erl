@@ -6,7 +6,7 @@
 
 -export([waiting/2, timing/2]).
 
--export([set_timeout/2]).
+-export([set_timeout/2, cancel_timeout/1]).
 
 start() ->
 	gen_fsm:start(?MODULE, [], []).
@@ -29,6 +29,9 @@ terminate(_Reason, _StateName, _Data) ->
 set_timeout(Pid, Payload) ->
 	gen_fsm:send_event(Pid, {set_timer, Payload}).
 
+cancel_timeout(Pid) ->
+	gen_fsm:send_event(Pid, cancel_timeout).
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%% Callbacks %%%%%%%%
@@ -45,7 +48,11 @@ timing({timeout, _Ref, _Msg}, {_Ref, Fun}) ->
 timing({set_timer, {Secs, Fun}}, {OldRef, _Fun}) ->
 	gen_fsm:cancel_timer(OldRef),
 	Ref = start_timer(Secs),
-	{next_state, timing, {Ref, Fun}}.
+	{next_state, timing, {Ref, Fun}};
+
+timing(cancel_timeout, {OldRef, _Fun}) ->
+	gen_fsm:cancel_timer(OldRef),
+	{next_state, waiting, []}.
 
 handle_event(stop, _StateName, {Ref, _Fun}) ->
 	gen_fsm:cancel_timer(Ref),

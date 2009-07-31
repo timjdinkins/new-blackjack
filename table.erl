@@ -34,8 +34,6 @@ terminate(_Reason, _StateName, #game{pid=Pid}) ->
 seat(Pid, Seat, Player) ->
 	gen_fsm:sync_send_event(Pid, {seat_player, Seat, Player}).
 
-bet(Pid, Seat, Amt)
-
 open_seats(Pid) ->
 	gen_fsm:sync_send_all_state_event(Pid, open_seats).
 
@@ -47,13 +45,13 @@ empty_table({seat_player, Seat, Player}, _From, #game{pid=Pid, players=Players}=
 	NewPlayers = dict:store(Seat, Player, Players),
 	NewGame = Game#game{players=NewPlayers},
 	ok = game:start_hand(Pid, NewPlayers),
-	{reply, {ok, seated}, playing, NewGame}.
+	{reply, {ok, Pid}, playing, NewGame}.
 	
-playing({seat_player, Seat, Player}, _From, #game{players=Players}=Game) ->
+playing({seat_player, Seat, Player}, _From, #game{pid=Pid, players=Players}=Game) ->
 	case seat_available(Seat, Players) of
 		true -> 
 			NewPlayers = dict:store(Seat, Player, Players),
-			{reply, {ok, seated}, playing, Game#game{players=NewPlayers}};
+			{reply, {ok, Pid}, playing, Game#game{players=NewPlayers}};
 		false ->
 			{reply, {error, seat_taken}, playing, Game}
 	end.
