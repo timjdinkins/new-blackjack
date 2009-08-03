@@ -2,14 +2,15 @@
 -behavior(gen_fsm).
 
 -record(seat, {pid, cards, bet=0}).
--record(state, {timer, seats, deck, hand}).
+-record(state, {tablepid, timer, seats, deck, hand}).
 
 -export([start/0, start_link/0, init/1, stop/1, terminate/3]).
 -export([handle_event/3]).
 
 -export([waiting/2, betting/2, betting/3, dealing/2, playing_hands/2, playing_hands/3, dealer/2]).
+-export([finish_game/2]).
 
--export([start_hand/2, stop_hand/1, notify_players/2, bet/3, hit/2, stay/2]).
+-export([start_hand/3, stop_hand/1, notify_players/2, bet/3, hit/2, stay/2]).
 
 start() ->
 	gen_fsm:start(?MODULE, [], []).
@@ -24,8 +25,8 @@ init([]) ->
 	{ok, Timer} = game_timer:start_link(),
 	{ok, waiting, #state{timer=Timer}}.
 
-terminate(_Reason, _StateName, _State) ->
-	io:format("Terminating!~n", []),
+terminate(Reason, StateName, _State) ->
+	io:format("Terminating in state ~p: ~p~n", [StateName, Reason]),
 	ok.
 
 
@@ -33,10 +34,10 @@ terminate(_Reason, _StateName, _State) ->
 %%%%%%% Public API %%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-start_hand(Pid, Players) ->
+start_hand(Pid, GamePid, Players) ->
 	{ok, Seats} = setup_seats(dict:to_list(Players)),
 	{ok, Deck}  = deck:shuffled(),
-	gen_fsm:send_event(Pid, {start_hand, Seats, Deck}).
+	gen_fsm:send_event(Pid, {start_hand, GamePid, Seats, Deck}).
 
 stop_hand(Pid) ->
 	gen_fsm:send_all_state_event(Pid, stop_hand).
@@ -54,20 +55,26 @@ stay(Pid, Seat) ->
 %%%%%%%% Callbacks %%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-waiting({start_hand, Seats, Deck}, #state{timer=Timer}=State) ->
+waiting({start_hand, TablePid, Seats, Deck}, #state{timer=Timer}=State) ->
 	ok = notify_players("Starting a new game", Seats),
 	send_self(0, start_betting, Timer),
-	{next_state, betting, State#state{seats=Seats, deck=Deck}}.
+	{next_state, betting, State#state{tablepid=TablePid, seats=Seats, deck=Deck}}.
 
 betting(start_betting, #state{timer=Timer, seats=Seats}=State) ->
 	ok = notify_players("Place your bets", Seats),
 	send_self(10, end_betting, Timer),
 	{next_state, betting, State};
 
-betting(end_betting, #state{timer=Timer}=State) ->
+betting(end_betting, #state{timer=Timer, seats=Seats}=State) ->
 	io:format("Betting is closed, dealing cards now.~n", []),
-	send_self(0, start_dealing, Timer),
-	{next_state, dealing, State}.
+	case anyone_playing(Seats) of
+		yes ->
+			send_self(0, start_dealing, Timer),
+			{next_state, dealing, State};
+		no  ->
+			send_self(0, payout_hands, Timer),
+			{next_state, finish_game, State}
+	end.
 
 betting({place_bet, Seat, Amt}, _From, #state{seats=Seats}=State) ->
 	{ok, #seat{bet=Bet}=SeatN} = dict:find(Seat, Seats),
@@ -93,16 +100,20 @@ playing_hands(play_hand, #state{timer=Timer, seats=Seats, hand=Hand}=State) ->
 	{next_state, playing_hands, State};
 
 playing_hands(next_hand, #state{timer=Timer, seats=Seats, hand=Hand}=State) ->
-	NextHand = next_hand(Hand, Seats),
-	send_self(0, play_hand, Timer),
-	{next_state, playing_hands, State#state{hand=NextHand}}.
+	case next_hand(Hand, Seats) of
+		{ok, all_hands_played} ->
+			send_self(0, play_hand, Timer),
+			{next_state, dealer, State};
+		NextHand ->
+			send_self(0, play_hand, Timer),
+			{next_state, playing_hands, State#state{hand=NextHand}}
+	end.
 
-playing_hands({stay, SeatN}, _From, #state{timer=Timer, seats=Seats, hand=Hand}=State) ->
+playing_hands({stay, SeatN}, _From, #state{timer=Timer, hand=Hand}=State) ->
 	case seat_from_hand(Hand) of
 		SeatN ->
-			NextHand = next_hand(Hand, Seats),
 			send_self(0, next_hand, Timer),
-			{reply, ok, playing_hands, State#state{hand=NextHand}};
+			{reply, ok, playing_hands, State};
 		_Else ->
 			{reply, {error, "It's not your turn!"}, playing_hands, State}
 	end;
@@ -110,27 +121,51 @@ playing_hands({stay, SeatN}, _From, #state{timer=Timer, seats=Seats, hand=Hand}=
 playing_hands({hit, SeatN}, _From, #state{timer=Timer, seats=Seats, hand=Hand, deck=Deck}=State) ->
 	case seat_from_hand(Hand) of
 		SeatN ->
-			{ok, #seat{cards=OldCards}=Seat} = dict:find(SeatN, Seats),
-			{ok, Cards, NewDeck} = deck:draw(1, Deck),
-			NewCards = OldCards ++ Cards,
+			{ok, #seat{pid=Pid, cards=Cards}=Seat} = dict:find(SeatN, Seats),
+			{ok, [Card], NewDeck} = deck:draw(1, Deck),
+			NewCards = [Card|Cards],
 			NewSeats = dict:store(SeatN, Seat#seat{cards=NewCards}, Seats),
 			
-			case hand:compute(NewCards) of
+			case bj_hand:compute(NewCards) of
 				Score when Score >= 21 ->
 					NextHand = next_hand(Hand, NewSeats),
 					send_self(0, next_hand, Timer),
 					NewState = State#state{seats=NewSeats, deck=NewDeck, hand=NextHand};
 				_Score ->
-					send_self(0, next_hand, Timer),
+					player:notify(Pid, "Hit or stay?"),
+					send_self(30, next_hand, Timer),
 					NewState = State#state{seats=NewSeats, deck=NewDeck}
 			end,
-			{reply, {ok, Cards}, playing_hands, NewState};
+			{reply, {ok, NewCards}, playing_hands, NewState};
 		_Else ->
 			{reply, {error, "It's not your turn!"}, playing_hands, State}
 	end.
 
-dealer(play_hand, State) ->
-	{next_hand, dealer, State}.
+dealer(play_hand, #state{timer=Timer, seats=Seats, deck=Deck}=State) ->
+	{ok, #seat{cards=Cards}=Dealer} = dict:find(dealer, Seats),
+	io:format("The dealer's hand is ~p.~n", [Cards]),
+	{ok, NewDeck, NewCards} = play_dealer_hand(Deck, Cards),
+	io:format("Dealer hand played~n", []),
+	NewSeats = dict:store(dealer, Dealer#seat{cards=NewCards}, Seats),
+	
+	io:format("The dealer finishes with ~p.~n", [NewCards]),
+	
+	send_self(2, payout_hands, Timer),
+	{next_state, finish_game, State#state{seats=NewSeats, deck=NewDeck}}.
+
+finish_game(payout_hands, #state{tablepid=TablePid, seats=Seats}=State) ->
+	io:format("Paying out hands~n", []),
+	case anyone_playing(Seats) of
+		yes ->
+			ok = payout_hands(Seats);
+		no ->
+			ok
+	end,
+	io:format("Done paying out hands~n", []),
+	{ok, Players, Quiters} = players_and_quiters(Seats),
+	io:format("Telling table to start a new game~n", []),
+	table:game_complete(TablePid, Players, Quiters),
+	{next_state, waiting, State}.
 
 handle_event(stop_game, StateName, Timer) ->
 	case StateName of
@@ -173,19 +208,82 @@ initial_deal(SeatHash, Deck) ->
 	initial_deal(dict:to_list(SeatHash), SeatHash, Deck).
 
 initial_deal([], SeatHash, Deck) ->
-	{ok, SeatHash, Deck};
+	{ok, Cards, NewDeck} = deck:draw(2, Deck),
+	{ok, dict:store(dealer, #seat{cards=Cards}, SeatHash), NewDeck};
 initial_deal([{SeatN, #seat{pid=Pid}=Seat}|Seats], SeatHash, Deck) ->
 	{ok, Cards, NewDeck} = deck:draw(2, Deck),
 	player:new_cards(Pid, Cards),
 	initial_deal(Seats, dict:store(SeatN, Seat#seat{cards=Cards}, SeatHash), NewDeck).
 
-next_hand(0, Seats) -> next_hand(1, Seats);
+play_dealer_hand(Deck, Cards) ->
+	play_dealer_hand(Deck, Cards, bj_hand:compute(Cards)).
+
+play_dealer_hand(Deck, Cards, Score) when Score >= 17 orelse length(Cards) > 4 ->
+	{ok, Deck, Cards};
+play_dealer_hand(Deck, Cards, _Score) ->
+	{ok, [NewCard], NewDeck} = deck:draw(1, Deck),
+	play_dealer_hand(NewDeck, [NewCard|Cards], bj_hand:compute([NewCard|Cards])).
+
+next_hand(N, _Seats) when N > 6 -> {ok, all_hands_played};
 next_hand(N, Seats) ->
-	SeatN = seat_from_hand(N),
+	Next = N + 1,
+	SeatN = seat_from_hand(Next),
 	case dict:find(SeatN, Seats) of
-		{ok, _Seat} -> N;
-		error	   -> next_hand(N + 1, Seats)
+		{ok, #seat{bet=Bet}} when Bet > 0 ->
+			Next;
+		{ok, _Seat} -> next_hand(Next, Seats);
+		error       -> next_hand(Next, Seats)
+	end.
+
+anyone_playing(Seats) ->
+	Fun = fun(_Seat, #seat{bet=Bet}) -> Bet > 0 end,
+	Rem = dict:filter(Fun, Seats),
+	case length(dict:to_list(Rem)) of
+		L when L > 0 -> yes;
+		_Else        -> no
 	end.
 
 seat_from_hand(N) ->
 	list_to_atom("seat" ++ integer_to_list(N)).
+
+payout_hands(Seats) ->
+	{ok, #seat{cards=Cards}} = dict:find(dealer, Seats),
+	DealerScore = bj_hand:compute(Cards),
+	payout_hands(next_hand(0, Seats), Seats, DealerScore).
+
+payout_hands(N, Seats, DealerScore) ->
+	SeatN = seat_from_hand(N),
+	{ok, #seat{pid=Pid, cards=Cards, bet=Bet}} = dict:find(SeatN, Seats),
+	case bj_hand:compute(Cards) of
+		Score when Score > 21 ->
+			player:lost(Pid, Bet);
+		Score when Score =< 21, DealerScore > 21 ->
+			player:paid(Pid, Bet);
+		Score when Score == DealerScore ->
+			player:paid(Pid, 0);
+		Score when Score >= DealerScore, Score == 21 ->
+			player:paid(Pid, Bet * 2);
+		Score when Score >= DealerScore ->
+			player:paid(Pid, Bet);
+		_Score ->
+			player:lost(Pid, Bet)
+	end,
+	case next_hand(N, Seats) of
+		{ok, all_hands_played} ->
+			ok;
+		N1 ->
+			payout_hands(N1, Seats, DealerScore)
+	end.
+
+players_and_quiters(Seats) ->
+	players_and_quiters(dict:to_list(Seats), dict:new(), dict:new()).
+
+players_and_quiters([], Players, Quiters) ->
+	{ok, dict:erase(dealer, Players), Quiters};
+players_and_quiters([{SeatN, #seat{bet=Bet, pid=Pid}}|Seats], Players, Quiters) ->
+	case Bet of
+		Bet when Bet > 0 ->
+			players_and_quiters(Seats, dict:store(SeatN, Pid, Players), Quiters);
+		_Bet ->
+			players_and_quiters(Seats, Players, dict:store(SeatN, Pid, Quiters))
+	end.

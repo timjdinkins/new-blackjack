@@ -8,7 +8,7 @@
 
 -export([empty_table/3, playing/2, playing/3]).
 
--export([seat/3, open_seats/1]).
+-export([seat/3, open_seats/1, game_complete/3]).
 
 start() ->
 	gen_fsm:start(?MODULE, [], []).
@@ -37,6 +37,9 @@ seat(Pid, Seat, Player) ->
 open_seats(Pid) ->
 	gen_fsm:sync_send_all_state_event(Pid, open_seats).
 
+game_complete(Pid, Players, Quiters) ->
+	gen_fsm:send_event(Pid, {game_complete, Players, Quiters}).
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%% Callbacks %%%%%%%%
@@ -44,7 +47,7 @@ open_seats(Pid) ->
 empty_table({seat_player, Seat, Player}, _From, #game{pid=Pid, players=Players}=Game) ->
 	NewPlayers = dict:store(Seat, Player, Players),
 	NewGame = Game#game{players=NewPlayers},
-	ok = game:start_hand(Pid, NewPlayers),
+	ok = game:start_hand(Pid, self(), NewPlayers),
 	{reply, {ok, Pid}, playing, NewGame}.
 	
 playing({seat_player, Seat, Player}, _From, #game{pid=Pid, players=Players}=Game) ->
@@ -58,8 +61,17 @@ playing({seat_player, Seat, Player}, _From, #game{pid=Pid, players=Players}=Game
 
 playing({game_complete, Players, Quiters}, #game{pid=Pid}=Game) ->
 	NewPlayers = remove_quiters(Players, Quiters),
-	ok = game:start_hand(Pid, NewPlayers),
-	{next_state, playing, Game#game{players=NewPlayers}}.
+	case length(dict:to_list(NewPlayers)) of
+		L when L > 0 ->
+			ok = game:start_hand(Pid, self(), NewPlayers),
+			{next_state, playing, Game#game{players=NewPlayers}};
+		_Else ->
+			{next_state, empty_table, Game#game{players=[]}}
+	end;
+
+playing(timeout, #game{pid=Pid, players=Players}=Game) ->
+	ok = game:start_hand(Pid, self(), Players),
+	{next_state, playing, Game}.
 
 handle_sync_event(print_players, _From, StateName, #game{players=Players}=Game) ->
 	io:format("~p~n", [Players]),
@@ -69,6 +81,10 @@ handle_event(stop, _StateName, #game{pid=Pid, players=_Players}=Game) ->
 	%% Tell the players we stopped this table
 	game:stop(Pid),
 	{stop, normal, Game}.
+
+% handle_info({'EXIT', _Pid, _Reason}, _StateName, Game) ->
+% 	{ok, GamePid} = game:start_link(),
+% 	{next_state, playing, Game#game{pid=GamePid}, 0}.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -84,5 +100,7 @@ find_open_seats(Players) ->
 
 remove_quiters(Players, []) ->
 	Players;
-remove_quiters(Players, [Quiter|Quiters]) ->
-	remove_quiters(dict:erase(Quiter, Players), Quiters).
+remove_quiters(Players, [{SeatN, _Pid}|Quiters]) ->
+	remove_quiters(dict:erase(SeatN, Players), Quiters);
+remove_quiters(Players, Quiters) ->
+	remove_quiters(Players, dict:to_list(Quiters)).

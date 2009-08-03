@@ -7,6 +7,7 @@
 -export([handle_call/3, handle_cast/2]).
 
 -export([find_table/1, table_pid/1, join_table/2, bet/2, stay/1, new_cards/2, hit/1, notify/2]).
+-export([paid/2, lost/2]).
 
 start(Name, Stack) ->
 	gen_server:start(?MODULE, [Name, Stack], []).
@@ -22,7 +23,11 @@ init([Name, Stack]) ->
 terminate(_Reason, _Game) ->
 	ok.
 
-%% Public API
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%% Public API %%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
 find_table(Pid) ->
 	gen_server:cast(Pid, find_table).
 
@@ -41,13 +46,22 @@ stay(Pid) ->
 new_cards(Pid, Cards) ->
 	gen_server:cast(Pid, {new_cards, Cards}).
 
+paid(Pid, Amt) ->
+	gen_server:cast(Pid, {paid, Amt}).
+
+lost(Pid, Amt) ->
+	gen_server:cast(Pid, {lost, Amt}).
+
 notify(Pid, Msg) ->
 	gen_server:cast(Pid, {notify, Msg}).
 
 table_pid(Pid) ->
 	gen_server:call(Pid, table_pid).
 
-%% Callbacks
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%% Callbacks %%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
 handle_call({join_table, Seat}, _From, #state{tablepid=TablePid}=State) ->
 	case table:seat(TablePid, Seat, self()) of
 		{ok, GamePid} -> Msg = "Successfully joined the table";
@@ -86,6 +100,16 @@ handle_cast({new_cards, Cards}, State) ->
 	io:format("Your hand is now: ~p~n", [Cards]),
 	io:format("Your hands score is: ~p~n", [bj_hand:compute(Cards)]),
 	{noreply, State#state{cards=Cards}};
+
+handle_cast({paid, Amt}, #state{stack=Stack}=State) ->
+	io:format("I won $~p~n", [Amt]),
+	io:format("Stack is now ~p~n", [Stack+Amt]),
+	{noreply, State#state{stack=Stack+Amt, bet=0}};
+
+handle_cast({lost, Amt}, #state{stack=Stack}=State) ->
+	io:format("I lost $~p~n", [Amt]),
+	io:format("Stack is now ~p~n", [Stack-Amt]),
+	{noreply, State#state{stack=Stack-Amt, bet=0}};
 
 handle_cast({notify, Msg}, State) ->
 	io:format("~p~n", [Msg]),
