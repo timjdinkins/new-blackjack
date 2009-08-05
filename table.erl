@@ -8,7 +8,7 @@
 
 -export([empty_table/3, playing/2, playing/3]).
 
--export([seat/3, open_seats/1, game_complete/3]).
+-export([seat/3, open_seats/1, game_complete/2]).
 
 start() ->
 	gen_fsm:start(?MODULE, [], []).
@@ -37,8 +37,8 @@ seat(Pid, Seat, Player) ->
 open_seats(Pid) ->
 	gen_fsm:sync_send_all_state_event(Pid, open_seats).
 
-game_complete(Pid, Players, Quiters) ->
-	gen_fsm:send_event(Pid, {game_complete, Players, Quiters}).
+game_complete(Pid, Quiters) ->
+	gen_fsm:send_event(Pid, {game_complete, Quiters}).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -59,14 +59,14 @@ playing({seat_player, Seat, Player}, _From, #game{pid=Pid, players=Players}=Game
 			{reply, {error, seat_taken}, playing, Game}
 	end.
 
-playing({game_complete, Players, Quiters}, #game{pid=Pid}=Game) ->
+playing({game_complete, Quiters}, #game{pid=Pid, players=Players}=Game) ->
 	NewPlayers = remove_quiters(Players, Quiters),
 	case length(dict:to_list(NewPlayers)) of
 		L when L > 0 ->
 			ok = game:start_hand(Pid, self(), NewPlayers),
 			{next_state, playing, Game#game{players=NewPlayers}};
 		_Else ->
-			{next_state, empty_table, Game#game{players=[]}}
+			{next_state, empty_table, Game#game{players=dict:new()}}
 	end;
 
 playing(timeout, #game{pid=Pid, players=Players}=Game) ->
@@ -91,7 +91,7 @@ handle_event(stop, _StateName, #game{pid=Pid, players=_Players}=Game) ->
 %%%%%%% Private API %%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 seat_available(Seat, Players) ->
-	lists:member(find_open_seats(Players), Seat).
+	lists:member(Seat, find_open_seats(Players)).
 
 find_open_seats(Players) ->
 	Seats = dict:fetch_keys(Players),

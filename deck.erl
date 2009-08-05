@@ -26,14 +26,15 @@ draw(N, Drawn, [Card|Deck]) ->
 
 shuffle(List) ->
 	%% Determine the log n portion then randomize the list.
-  randomize(round(math:log(length(List)) + 0.5), List).
+	random:seed(now()),
+	randomize(round(math:log(length(List)) + 0.5), List).
 
 randomize(1, List) ->
-  randomize(List);
+ 	randomize(List);
 randomize(T, List) ->
 	randomize(randomize(T - 1, List)).
 
 randomize(List) ->
-  Zipped = lists:map(fun(A) -> {random:uniform(), A} end, List),
-  {_Rands, D} = lists:unzip(lists:keysort(1, Zipped)), 
-  D.
+ 	Zipped = lists:map(fun(A) -> {random:uniform(), A} end, List),
+  	{_Rands, D} = lists:unzip(lists:keysort(1, Zipped)), 
+  	D.

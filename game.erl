@@ -62,7 +62,7 @@ waiting({start_hand, TablePid, Seats, Deck}, #state{timer=Timer}=State) ->
 
 betting(start_betting, #state{timer=Timer, seats=Seats}=State) ->
 	ok = notify_players("Place your bets", Seats),
-	send_self(10, end_betting, Timer),
+	send_self(30, end_betting, Timer),
 	{next_state, betting, State};
 
 betting(end_betting, #state{timer=Timer, seats=Seats}=State) ->
@@ -76,10 +76,16 @@ betting(end_betting, #state{timer=Timer, seats=Seats}=State) ->
 			{next_state, finish_game, State}
 	end.
 
-betting({place_bet, Seat, Amt}, _From, #state{seats=Seats}=State) ->
+betting({place_bet, Seat, Amt}, _From, #state{timer=Timer, seats=Seats}=State) ->
 	{ok, #seat{bet=Bet}=SeatN} = dict:find(Seat, Seats),
 	NewSeats = dict:store(Seat, SeatN#seat{bet= Bet + Amt}, Seats),
-	{reply, {ok, Bet + Amt}, betting, State#state{seats=NewSeats}}.
+	case all_bets_in(NewSeats) of
+		yes ->
+			send_self(0, end_betting, Timer),
+			{reply, {ok, Bet + Amt}, betting, State#state{seats=NewSeats}};
+		no  ->
+			{reply, {ok, Bet + Amt}, betting, State#state{seats=NewSeats}}
+	end.
 
 dealing(start_dealing, #state{timer=Timer, seats=Seats, deck=Deck}=State) ->
 	%% This will deal the cards and inform the users of their hands
@@ -128,9 +134,8 @@ playing_hands({hit, SeatN}, _From, #state{timer=Timer, seats=Seats, hand=Hand, d
 			
 			case bj_hand:compute(NewCards) of
 				Score when Score >= 21 ->
-					NextHand = next_hand(Hand, NewSeats),
 					send_self(0, next_hand, Timer),
-					NewState = State#state{seats=NewSeats, deck=NewDeck, hand=NextHand};
+					NewState = State#state{seats=NewSeats, deck=NewDeck};
 				_Score ->
 					player:notify(Pid, "Hit or stay?"),
 					send_self(30, next_hand, Timer),
@@ -142,16 +147,20 @@ playing_hands({hit, SeatN}, _From, #state{timer=Timer, seats=Seats, hand=Hand, d
 	end.
 
 dealer(play_hand, #state{timer=Timer, seats=Seats, deck=Deck}=State) ->
-	{ok, #seat{cards=Cards}=Dealer} = dict:find(dealer, Seats),
-	io:format("The dealer's hand is ~p.~n", [Cards]),
-	{ok, NewDeck, NewCards} = play_dealer_hand(Deck, Cards),
-	io:format("Dealer hand played~n", []),
-	NewSeats = dict:store(dealer, Dealer#seat{cards=NewCards}, Seats),
-	
-	io:format("The dealer finishes with ~p.~n", [NewCards]),
-	
-	send_self(2, payout_hands, Timer),
-	{next_state, finish_game, State#state{seats=NewSeats, deck=NewDeck}}.
+	case everyone_busted(Seats) of
+		true ->
+			send_self(0, payout_hands, Timer),
+			{next_state, finish_game, State};
+		_Else ->
+			{ok, #seat{cards=Cards}=Dealer} = dict:find(dealer, Seats),
+			io:format("The dealer's hand is ~p.~n", [Cards]),
+			{ok, NewDeck, NewCards} = play_dealer_hand(Deck, Cards),
+			io:format("Dealer hand played~n", []),
+			NewSeats = dict:store(dealer, Dealer#seat{cards=NewCards}, Seats),
+			io:format("The dealer finishes with ~p.~n", [bj_hand:compute(NewCards)]),
+			send_self(2, payout_hands, Timer),
+			{next_state, finish_game, State#state{seats=NewSeats, deck=NewDeck}}
+	end.
 
 finish_game(payout_hands, #state{tablepid=TablePid, seats=Seats}=State) ->
 	io:format("Paying out hands~n", []),
@@ -162,9 +171,9 @@ finish_game(payout_hands, #state{tablepid=TablePid, seats=Seats}=State) ->
 			ok
 	end,
 	io:format("Done paying out hands~n", []),
-	{ok, Players, Quiters} = players_and_quiters(Seats),
+	{ok, Quiters} = find_quiters(Seats),
 	io:format("Telling table to start a new game~n", []),
-	table:game_complete(TablePid, Players, Quiters),
+	table:game_complete(TablePid, Quiters),
 	{next_state, waiting, State}.
 
 handle_event(stop_game, StateName, Timer) ->
@@ -210,10 +219,15 @@ initial_deal(SeatHash, Deck) ->
 initial_deal([], SeatHash, Deck) ->
 	{ok, Cards, NewDeck} = deck:draw(2, Deck),
 	{ok, dict:store(dealer, #seat{cards=Cards}, SeatHash), NewDeck};
-initial_deal([{SeatN, #seat{pid=Pid}=Seat}|Seats], SeatHash, Deck) ->
-	{ok, Cards, NewDeck} = deck:draw(2, Deck),
-	player:new_cards(Pid, Cards),
-	initial_deal(Seats, dict:store(SeatN, Seat#seat{cards=Cards}, SeatHash), NewDeck).
+initial_deal([{SeatN, #seat{pid=Pid,bet=Bet}=Seat}|Seats], SeatHash, Deck) ->
+	if
+		Bet > 0 ->
+			{ok, Cards, NewDeck} = deck:draw(2, Deck),
+			player:new_cards(Pid, Cards),
+			initial_deal(Seats, dict:store(SeatN, Seat#seat{cards=Cards}, SeatHash), NewDeck);
+		true ->
+			initial_deal(Seats, SeatHash, Deck)
+	end.
 
 play_dealer_hand(Deck, Cards) ->
 	play_dealer_hand(Deck, Cards, bj_hand:compute(Cards)).
@@ -240,6 +254,14 @@ anyone_playing(Seats) ->
 	Rem = dict:filter(Fun, Seats),
 	case length(dict:to_list(Rem)) of
 		L when L > 0 -> yes;
+		_Else        -> no
+	end.
+
+all_bets_in(Seats) ->
+	Fun = fun(_Seat, #seat{bet=Bet}) -> Bet == 0 end,
+	Rem = dict:filter(Fun, Seats),
+	case length(dict:to_list(Rem)) of
+		L when L == 0 -> yes;
 		_Else        -> no
 	end.
 
@@ -275,15 +297,12 @@ payout_hands(N, Seats, DealerScore) ->
 			payout_hands(N1, Seats, DealerScore)
 	end.
 
-players_and_quiters(Seats) ->
-	players_and_quiters(dict:to_list(Seats), dict:new(), dict:new()).
+find_quiters(Seats) ->
+	Fun = fun(_Seat, #seat{bet=Bet}) -> Bet == 0 end,
+	{ok, dict:filter(Fun, Seats)}.
 
-players_and_quiters([], Players, Quiters) ->
-	{ok, dict:erase(dealer, Players), Quiters};
-players_and_quiters([{SeatN, #seat{bet=Bet, pid=Pid}}|Seats], Players, Quiters) ->
-	case Bet of
-		Bet when Bet > 0 ->
-			players_and_quiters(Seats, dict:store(SeatN, Pid, Players), Quiters);
-		_Bet ->
-			players_and_quiters(Seats, Players, dict:store(SeatN, Pid, Quiters))
-	end.
+everyone_busted(Seats) ->
+	Fun = fun(_Seat, #seat{cards=Cards}) -> 
+			  (Cards /= undefined) and (bj_hand:compute(Cards) =< 21)
+	end,
+	length(dict:to_list(dict:filter(Fun, dict:erase(dealer, Seats)))) == 0.
