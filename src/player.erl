@@ -6,7 +6,7 @@
 -export([start/2, start_link/2, init/1, stop/1, terminate/2]).
 -export([handle_call/3, handle_cast/2]).
 
--export([find_table/1, table_pid/1, join_table/2, bet/2, stay/1, new_cards/2, hit/1, notify/2]).
+-export([find_table/1, join_table/2, bet/2, stay/1, new_cards/2, hit/1, notify/2]).
 -export([paid/2, lost/2]).
 
 start(Name, Stack) ->
@@ -55,9 +55,6 @@ lost(Pid, Amt) ->
 notify(Pid, Msg) ->
 	gen_server:cast(Pid, {notify, Msg}).
 
-table_pid(Pid) ->
-	gen_server:call(Pid, table_pid).
-
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%% Callbacks %%%%%%%%
@@ -73,9 +70,6 @@ handle_call({bet, Amt}, _From, #state{gamepid=GamePid, seat=Seat, stack=Stack, b
 	NewBet = Amt + Bet,
 	{ok, NewBet} = game:bet(GamePid, Seat, Amt),
 	{reply, {ok, NewBet}, State#state{bet=NewBet}};
-
-handle_call(table_pid, _From, #state{tablepid=TablePid}=State) ->
-	{reply, TablePid, State};
 
 handle_call(hit, _From, #state{gamepid=GamePid, seat=Seat}=State) ->
 	case game:hit(GamePid, Seat) of
