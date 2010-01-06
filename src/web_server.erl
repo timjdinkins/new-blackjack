@@ -1,51 +1,52 @@
 -module(web_server).
 
--export([start/1, stop/0, dispatch_requests/1]).
-
--define(OK, <<"ok">>).
+-export([start/1, stop/0, dispatch_request/1]).
 
 start(Port) ->
-	mochiweb_http:start([{port, Port}, {loop, fun dispatch_requests/1}]).
+	mochiweb_http:start([{port, Port}, {loop, fun dispatch_request/1}]).
 
 stop() ->
 	mochiweb_http:stop().
 
-dispatch_requests(Req) ->
+json_ok(Req, Msgs) -> json_respond("ok", Msgs, Req).
+json_error(Req, Msgs) -> json_respond("error", Msgs, Req).
+
+json_respond(Status, Msgs, Req) -> Req:ok({"text/json", [], json_msg(Status, Msgs)}).
+json_msg(Status, Msgs) ->
+	lists:flatten(rfc4627:encode({obj, [{"status", <<Status>>}, Msgs]})).
+
+listen(Req, SID) ->
+	player:listen(SID, self()),
+	receive
+		timeout -> json_ok(Req, {action, reconnect});
+		{messages, Msgs} -> json_ok(Req, Msgs)
+	end.
+
+timeout_listen(Pid) -> Pid ! timeout.
+
+dispatch_request(Req) ->
 	Path = Req:get(path),
 	Action = clean_path(Path),
-	handle(Action, Req).
+	handle_action(Action, Req).
 
-handle("/register", Req) ->
-	Params = Req:parse_qs(),
-	Name = proplists:get_value("name", Params),
-	case web_players:register(Name) of
-		{ok, Pid} ->
-			respond(Req, 200, subst("Pid: ~s", [pid_to_list(Pid)]));
-		{error, Msg} ->
-			respond(Req, 200, subst("Error: ~s", [Msg]))
-	end;
+handle_action("/bet", Req) ->
+	SID = get_sid(Req),
+	Amt = get_param(Req, "amt"),
+	send_player(SID, {bet, Amt}),
+	json_ok(Req, {response, ok});
 
-handle("/join-table", Req) ->
-	Params = Req:parse_qs(),
-	Name = proplists:get_value("name", Params),
-	Seat = proplists:get_value("seat", Params),
-	case web_players:get_pid(Name) of
-		{ok, Pid} ->
-			player:find_table(Pid),
-			player:join_table(Pid, list_to_atom(Seat)),
-			respond(Req, 200, subst("OK", []));
-		{error, Msg} ->
-			respond(Req, 200, subst("Error: ~s", [Msg]))
-	end;
+handle_action("/listen", Req) ->
+	SID = get_sid(Req),
+	timer:apply_after(30000, ?MODULE, timeout_listen, [self()]),
+	wait(Req, SID);
 
-handle(Unknown, Req) ->
-	respond(Req, 404, subst("Unknown action: ~s", [Unknown])).
-
-respond(Req, Code, Msg) ->
-	Req:response({Code, [{"Content-Type", "text/plain"}], Msg}).
-
-subst(Template, Values) when is_list(Values) ->
-	list_to_binary(lists:flatten(io_lib:fwrite(Template, Values))).
+handle_action("/register", Req) ->
+	Name = get_param(Req, "name"),
+	% Impliment This!!!
+	SID = player_registry:generate_sid(),
+	{ok, Pid} = player:start(SID, Name, 200),
+	player_registry:register_sid(SID, Pid),
+	json_ok(Req, {sid, <<SID>>}).
 
 clean_path(Path) ->
 	case string:str(Path, "?") of
@@ -54,3 +55,14 @@ clean_path(Path) ->
 		N ->
 			string:substr(Path, 1, string:len(Path) - (N + 1))
 	end.
+
+send_player(SID, Msg) ->
+	% Impliment This!!!
+	Pid = player_registry:player_pid_from_sid(SID),
+	player:msg_from_web_client(Pid, Msg).
+
+get_param(Req, ValName) ->
+	proplists:get_value(ValName, Req:parse_qs()).
+
+get_sid(Req) ->
+	get_param(Req, "sid").

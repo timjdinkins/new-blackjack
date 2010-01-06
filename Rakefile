@@ -12,6 +12,10 @@ directory 'ebin'
 rule ".beam" => ["%{ebin.src}X.erl"] do |t|
   sh "erlc -pa ebin -W #{ERLC_FLAGS} -o ebin #{t.source}"
 end
+
+task :libs do
+  cp Dir.glob('lib/**/*.beam'), 'ebin/'
+end
  
-task :compile => ['ebin'] + OBJ
+task :compile => ['ebin', :libs] + OBJ
 task :default => :compile

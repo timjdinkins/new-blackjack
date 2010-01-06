@@ -1,3 +1,7 @@
+###################################################################
+
+Pre 2008-06-01
+
 I have the game flow working all the way up to hit and stay (while playing a hand).
 
 I have not tested more than one hand.
@@ -9,3 +13,5 @@ I have added checking to see if a player is busted, and then moving on, but have
 The deck seems to always be dealing the same cards :(  Maybe you have to seed the random number generator???
 
 I have stubbed the dealer hand, but done nothing with it.
+
+###################################################################

@@ -74,7 +74,10 @@ betting(end_betting, #state{timer=Timer, seats=Seats}=State) ->
 		no  ->
 			send_self(0, payout_hands, Timer),
 			{next_state, finish_game, State}
-	end.
+	end;
+
+betting(Any, State) ->
+	{next_state, betting, State}.
 
 betting({place_bet, Seat, Amt}, _From, #state{timer=Timer, seats=Seats}=State) ->
 	{ok, #seat{bet=Bet}=SeatN} = dict:find(Seat, Seats),
@@ -85,7 +88,10 @@ betting({place_bet, Seat, Amt}, _From, #state{timer=Timer, seats=Seats}=State) -
 			{reply, {ok, Bet + Amt}, betting, State#state{seats=NewSeats}};
 		no  ->
 			{reply, {ok, Bet + Amt}, betting, State#state{seats=NewSeats}}
-	end.
+	end;
+
+betting(Any, _From, State) ->
+	{reply, {error, unexpected_request}, betting, State}.
 
 dealing(start_dealing, #state{timer=Timer, seats=Seats, deck=Deck}=State) ->
 	%% This will deal the cards and inform the users of their hands
@@ -113,7 +119,10 @@ playing_hands(next_hand, #state{timer=Timer, seats=Seats, hand=Hand}=State) ->
 		NextHand ->
 			send_self(0, play_hand, Timer),
 			{next_state, playing_hands, State#state{hand=NextHand}}
-	end.
+	end;
+
+playing_hands(Any, State) ->
+	{next_state, playing_hands, State}.
 
 playing_hands({stay, SeatN}, _From, #state{timer=Timer, hand=Hand}=State) ->
 	case seat_from_hand(Hand) of
@@ -144,7 +153,10 @@ playing_hands({hit, SeatN}, _From, #state{timer=Timer, seats=Seats, hand=Hand, d
 			{reply, {ok, NewCards}, playing_hands, NewState};
 		_Else ->
 			{reply, {error, "It's not your turn!"}, playing_hands, State}
-	end.
+	end;
+
+playing_hands(Any, _From, State) ->
+	{reply, {error, unexpected_request}, playing_hands, State}.
 
 dealer(play_hand, #state{timer=Timer, seats=Seats, deck=Deck}=State) ->
 	case everyone_busted(Seats) of
