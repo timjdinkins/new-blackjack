@@ -10,8 +10,7 @@ shuffled() ->
 	{ok, shuffle(Cards)}.
 
 cards() ->
-	F = fun(S) -> [{S, C, V} || {C, V} <- ?CARDS] end,
-	{ok, lists:flatten(lists:map(F, ?SUITS))}.
+	[{S, C, V} || S <- ?SUITS, {C, V} <- ?CARDS].
 
 draw(N, [Card|Deck]) ->
 	draw(N - 1, [Card], Deck).
