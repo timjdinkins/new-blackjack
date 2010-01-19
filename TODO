@@ -1,0 +1,9 @@
+Start back in on the Player.
+
+I left off with refactoring the casino to track tables as lists, instead of more complex data types.
+
+I refactored the table object to treat players as a simple list as well, ignoring the "seat".
+
+The Game was tweaked a little to deal with this as well.
+
+Next up is "make sure the game actually works, though we may need a functional player to do that" and then make sure the player works and can work in this new system.
