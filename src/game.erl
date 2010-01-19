@@ -1,7 +1,7 @@
 -module(game).
 -behavior(gen_fsm).
 
--record(seat, {pid, cards, bet=0}).
+-record(seat, {pid, name, cards, bet=0}).
 -record(state, {tablepid, timer, seats, deck, hand}).
 
 -export([start/0, start_link/0, init/1, stop/1, terminate/3]).
@@ -34,10 +34,10 @@ terminate(Reason, StateName, _State) ->
 %%%%%%% Public API %%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-start_hand(Pid, GamePid, Players) ->
-	{ok, Seats} = setup_seats(dict:to_list(Players)),
+start_hand(Pid, TablePid, Players) ->
+	{ok, Seats} = setup_seats(Players),
 	{ok, Deck}  = deck:shuffled(),
-	gen_fsm:send_event(Pid, {start_hand, GamePid, Seats, Deck}).
+	gen_fsm:send_event(Pid, {start_hand, TablePid, Seats, Deck}).
 
 stop_hand(Pid) ->
 	gen_fsm:send_all_state_event(Pid, stop_hand).
@@ -217,13 +217,13 @@ do_notify(Msg, [{_Seat,#seat{pid=Pid}}|Seats]) ->
 	player:notify(Pid, Msg),
 	do_notify(Msg, Seats).
 
-setup_seats([{Seat, Pid}|Players]) ->
+setup_seats([{Pid, Name}|Players]) ->
 	Seats = dict:new(),
-	setup_seats(Players, dict:store(Seat, #seat{pid=Pid}, Seats)).
-setup_seats([], Seats) ->
+	setup_seats(Players, 1, dict:store(1, #seat{pid=Pid, name=Name}, Seats)).
+setup_seats([], _N, Seats) ->
 	{ok, Seats};
-setup_seats([{Seat, Pid}|Players], Seats) ->
-	setup_seats(Players, dict:store(Seat, #seat{pid=Pid}, Seats)).
+setup_seats([{Pid, Name}|Players], N, Seats) ->
+	setup_seats(Players, N + 1, dict:store(N + 1, #seat{pid=Pid, name=Name}, Seats)).
 
 initial_deal(SeatHash, Deck) ->
 	initial_deal(dict:to_list(SeatHash), SeatHash, Deck).
