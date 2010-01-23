@@ -30,11 +30,8 @@ terminate(_Reason, _Game) ->
 %%%%%%% Public API %%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-find_table(Pid) ->
-	gen_server:cast(Pid, find_table).
-
-join_table(Pid, Seat) ->
-	gen_server:call(Pid, {join_table, Seat}).
+join_table(Pid) ->
+	gen_server:call(Pid, join_table).
 
 bet(Pid, Amt) ->
 	gen_server:call(Pid, {bet, Amt}).
@@ -70,11 +67,10 @@ msg_from_web_client(Pid, Msg) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
-handle_call({join_table, Seat}, _From, #state{table=#table{pid=TablePid}}=State) ->
-	case table:seat(TablePid, Seat, self()) of
-		{ok, GamePid} ->
-			Msg = "Successfully joined the table",
-			{reply, Msg, State#state{game=#game{pid=GamePid}}};
+handle_call(join_table, _From, #state{name=Name}=State) ->
+	case casino:join_table(self(), Name) of
+		{table, Table, Game, Seat} ->
+			{reply, Msg, State#state{table=#table{pid=Table, seat=Seat}, game=#game{pid=Game}}};
 		{error, Msg}  ->
 			{reply, Msg, State}
 	end;
@@ -107,10 +103,6 @@ handle_call(hit, _From, #state{game=Game, table=Table}=State) ->
 handle_cast(stay, #state{game=Game, table=Table}=State) ->
 	game:stay(Game#game.pid, Table#table.seat),
 	{noreply, State};
-
-handle_cast(find_table, State) ->
-	{table, TablePid} = casino:find_table(),
-	{noreply, State#state{table=#table{pid=TablePid}}};
 
 handle_cast({new_cards, Cards}, #state{game=Game}=State) ->
 	io:format("Your hand is now: ~p~n", [Cards]),

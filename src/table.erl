@@ -44,13 +44,14 @@ game_complete(Pid, Quiters) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%% Callbacks %%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
-empty_table({seat_player, Player}, _From, #game{pid=Pid}=Game) ->
-	NewGame = Game#game{players=[Player]},
-	ok = game:start_hand(Pid, self(), [Player]),
-	{reply, {ok, Pid}, playing, NewGame}.
+empty_table({seat_player, Player}, _From, #game{pid=GamePid}=Game) ->
+	NewGame = Game#game{players=[{0, Player}]},
+	ok = game:start_hand(Pid, self(), [{0, Player}]),
+	{reply, {ok, 0, GamePid}, playing, NewGame}.
 	
-playing({seat_player, Player}, _From, #game{pid=Pid, players=Players}=Game) ->
-	{reply, {ok, Pid}, playing, Game#game{players=[Player|Players]}}.
+playing({seat_player, Player}, _From, #game{pid=GamePid, players=Players}=Game) ->
+	{Seat, Ps} = add_player(Player, Players),
+	{reply, {ok, Seat, GamePid}, playing, Game#game{players=Ps}}.
 
 playing({game_complete, Quiters}, #game{pid=Pid, players=Players}=Game) ->
 	NewPlayers = remove_quiters(Players, Quiters),
@@ -85,3 +86,7 @@ remove_quiters(Players, []) ->
 	Players;
 remove_quiters(Players, [Player|Quiters]) ->
 	remove_quiters(lists:delete(Player, Players), Quiters).
+
+add_player(P, Ps) ->
+	[Fst|_] = lists:subtract(lists:seq(0,7), [I| {I,_} <- Ps]),
+	{Fst, lists:keysort(1, [{Fst, P}|Players])}.

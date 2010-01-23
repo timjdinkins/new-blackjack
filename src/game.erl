@@ -2,7 +2,7 @@
 -behavior(gen_fsm).
 
 -record(seat, {pid, name, cards, bet=0}).
--record(state, {tablepid, timer, seats, deck, hand}).
+-record(state, {tablepid, timer, seats, deck, hand, dealer=#seat}).
 
 -export([start/0, start_link/0, init/1, stop/1, terminate/3]).
 -export([handle_event/3]).
@@ -66,7 +66,7 @@ betting(start_betting, #state{timer=Timer, seats=Seats}=State) ->
 	{next_state, betting, State};
 
 betting(end_betting, #state{timer=Timer, seats=Seats}=State) ->
-	io:format("Betting is closed, dealing cards now.~n", []),
+	ok = notify_players("Betting is closed, dealing cards now.", Seats),
 	case anyone_playing(Seats) of
 		yes ->
 			send_self(0, start_dealing, Timer),
@@ -95,9 +95,9 @@ betting(Any, _From, State) ->
 
 dealing(start_dealing, #state{timer=Timer, seats=Seats, deck=Deck}=State) ->
 	%% This will deal the cards and inform the users of their hands
-	{ok, NewSeats, NewDeck} = initial_deal(Seats, Deck),
+	{ok, NewSeats, Dealer, NewDeck} = initial_deal(Seats, Deck),
 	send_self(0, play_hand, Timer),
-	{next_state, playing_hands, State#state{seats=NewSeats, deck=NewDeck, hand=next_hand(0, Seats)}}.
+	{next_state, playing_hands, State#state{seats=NewSeats, dealer=Dealer, deck=NewDeck, hand=next_hand(0, Seats)}}.
 
 %% If we have played through all 6 hands, move on to the dealer.
 playing_hands(play_hand, #state{timer=Timer, hand=Hand}=State) when Hand > 6 ->
@@ -210,35 +210,28 @@ send_self(Secs, Msg, Timer) ->
 	ok = game_timer:set_timeout(Timer, {Secs, fun() -> gen_fsm:send_event(MyPid, Msg) end}).
 
 notify_players(Msg, Dict) ->
-	do_notify(Msg, dict:to_list(Dict)).
+	Notifier = fun({_S, #seat{pid=Pid}} -> player:notify(Pid, Msg)),
+	lists:foreach(Notifier, dict:to_list(Dict)),
+	ok.
 
-do_notify(_Msg, []) -> ok;
-do_notify(Msg, [{_Seat,#seat{pid=Pid}}|Seats]) ->
-	player:notify(Pid, Msg),
-	do_notify(Msg, Seats).
+setup_seats([{Seat, {Pid, Name}}|Players]) ->
+	SeatMaker = fun({Seat, {Pid, Name}}) -> {Seat, #seat{pid=Pid, name=Name}} end,
+	{ok, lists:map(SeatMaker, Players)}.
 
-setup_seats([{Pid, Name}|Players]) ->
-	Seats = dict:new(),
-	setup_seats(Players, 1, dict:store(1, #seat{pid=Pid, name=Name}, Seats)).
-setup_seats([], _N, Seats) ->
-	{ok, Seats};
-setup_seats([{Pid, Name}|Players], N, Seats) ->
-	setup_seats(Players, N + 1, dict:store(N + 1, #seat{pid=Pid, name=Name}, Seats)).
+initial_deal(Seats, Deck) ->
+	initial_deal([], Seats, Deck).
 
-initial_deal(SeatHash, Deck) ->
-	initial_deal(dict:to_list(SeatHash), SeatHash, Deck).
-
-initial_deal([], SeatHash, Deck) ->
+initial_deal(Consumed, [], Deck) ->
 	{ok, Cards, NewDeck} = deck:draw(2, Deck),
-	{ok, dict:store(dealer, #seat{cards=Cards}, SeatHash), NewDeck};
-initial_deal([{SeatN, #seat{pid=Pid,bet=Bet}=Seat}|Seats], SeatHash, Deck) ->
+	{ok, lists:reverse(Consumed), #seat{cards=Cards}, NewDeck};
+initial_deal(Consumed, [{SeatN, #seat{pid=Pid,bet=Bet}=Seat}=S|Seats], Deck) ->
 	if
 		Bet > 0 ->
 			{ok, Cards, NewDeck} = deck:draw(2, Deck),
 			player:new_cards(Pid, Cards),
-			initial_deal(Seats, dict:store(SeatN, Seat#seat{cards=Cards}, SeatHash), NewDeck);
+			initial_deal([{SeatN, Seat#seat{cards=Cards}}|Consumed], Seats, NewDeck);
 		true ->
-			initial_deal(Seats, SeatHash, Deck)
+			initial_deal([S|Consumed], Seats, Deck)
 	end.
 
 play_dealer_hand(Deck, Cards) ->
@@ -252,13 +245,10 @@ play_dealer_hand(Deck, Cards, _Score) ->
 
 next_hand(N, _Seats) when N > 6 -> {ok, all_hands_played};
 next_hand(N, Seats) ->
-	Next = N + 1,
-	SeatN = seat_from_hand(Next),
-	case dict:find(SeatN, Seats) of
-		{ok, #seat{bet=Bet}} when Bet > 0 ->
-			Next;
-		{ok, _Seat} -> next_hand(Next, Seats);
-		error       -> next_hand(Next, Seats)
+	case lists:keyfind(N, 1, Seats) of
+		{N, #seat{bet=Bet}} when Bet > 0 ->
+			N + 1;
+		false -> next_hand(N + 1, Seats)
 	end.
 
 anyone_playing(Seats) ->
@@ -276,9 +266,6 @@ all_bets_in(Seats) ->
 		L when L == 0 -> yes;
 		_Else        -> no
 	end.
-
-seat_from_hand(N) ->
-	list_to_atom("seat" ++ integer_to_list(N)).
 
 payout_hands(Seats) ->
 	{ok, #seat{cards=Cards}} = dict:find(dealer, Seats),

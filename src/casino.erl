@@ -15,7 +15,7 @@ start_link() ->
 stop() ->
 	gen_server:cast(?MODULE, stop).
 
-join_table({Pid, Name}) ->
+join_table(Pid, Name) ->
 	gen_server:call(?MODULE, {join_table, Pid, Name}).
 
 leave_table({Table, Player}) ->
@@ -46,8 +46,8 @@ handle_call({join_table, Pid, Name}, _From, #state{open_tables=[T1|OpenTables]}=
 			end
 	end,
 	{TPid, _, _} = Table,
-	table:seat_player(TPid, {Pid, Name}),
-	{reply, {table, Table}, NewState};
+	{ok, Seat, GPid} = table:seat_player(TPid, {Pid, Name}),
+	{reply, {ok, TPid, GPid, Seat}, NewState};
 
 handle_call({leave_table, Table, Player}, _From, #state{open_tables=OpenTables, full_tables=FullTables}=State) ->
 	case leave_table(Table, Player, OpenTables) of
