@@ -2,7 +2,7 @@
 -behavior(gen_fsm).
 
 -record(seat, {name, cards, bet=0}).
--record(state, {tablepid, timer, seats, deck, hand, dealer=#seat}).
+-record(state, {tablepid, timer, seats, deck, hand, dealer=#seat{}}).
 
 -export([start/0, start_link/0, init/1, stop/1, terminate/3]).
 -export([handle_event/3]).
@@ -78,18 +78,18 @@ betting(end_betting, #state{timer=Timer, seats=Seats}=State) ->
 	
 betting({place_bet, SeatN, Amt}, #state{timer=Timer, seats=Seats}=State) ->
 	{SeatN, Pid, #seat{bet=Bet}=Seat} = lists:keyfind(SeatN, 1, Seats),
-	NewSeats = lists:keystore(SeatN, 1, Seats, {SeatN, Pid, Seat#seat{bet=Bet + Amt}})
+	NewSeats = lists:keystore(SeatN, 1, Seats, {SeatN, Pid, Seat#seat{bet=Bet + Amt}}),
 	case all_bets_in(NewSeats) of
-		yes -> send_self(0, end_betting, Timer);
-		no  -> % don't to anything
+		yes   -> send_self(0, end_betting, Timer);
+		_Any  -> 1 % don't to anything
 	end,
 	notify_players(Seats, {udpate_table, {{seat, SeatN}, {bet, Bet + Amt}}}),
 	{next_state, betting, State#state{seats=NewSeats}};
 
-betting(Any, State) ->
+betting(_Any, State) ->
 	{next_state, betting, State}.
 
-betting(Any, _From, State) ->
+betting(_Any, _From, State) ->
 	{reply, {error, unexpected_request}, betting, State}.
 
 dealing(start_dealing, #state{timer=Timer, seats=Seats, deck=Deck}=State) ->
@@ -119,13 +119,13 @@ playing_hands(next_hand, #state{timer=Timer, seats=Seats, hand=Hand}=State) ->
 			{next_state, playing_hands, State#state{hand=NextHand}}
 	end;
 
-playing_hands({stay, SeatN}, #state{timer=Timer, seat=Seats, hand=SeatN}=State) ->
+playing_hands({stay, SeatN}, #state{timer=Timer, seats=Seats, hand=SeatN}=State) ->
 	notify_players(Seats, {update_table, {{seat, SeatN}, {action, stay}}}),
 	send_self(0, next_hand, Timer),
 	{next_state, playing_hands, State};
 
 playing_hands({hit, SeatN}, #state{timer=Timer, seats=Seats, hand=SeatN, deck=Deck}=State) ->
-	{ok, #seat{pid=Pid, cards=Cards}=Seat} = lists:keyfind(SeatN, 1, Seats),
+	{SeatN, Pid, #seat{cards=Cards}=Seat} = lists:keyfind(SeatN, 1, Seats),
 	{ok, [Card], NewDeck} = deck:draw(1, Deck),
 	NewCards = [Card|Cards],
 	NewSeats = lists:keystore(SeatN, 1, Seat#seat{cards=NewCards}, Seats),
@@ -141,12 +141,12 @@ playing_hands({hit, SeatN}, #state{timer=Timer, seats=Seats, hand=SeatN, deck=De
 			send_self(30, next_hand, Timer),
 			NewState = State#state{seats=NewSeats, deck=NewDeck}
 	end,
-	{next_state, playing_hands, NewState}.
+	{next_state, playing_hands, NewState};
 
-playing_hands(Any, State) ->
-	{next_state, playing_hands, State};
+playing_hands(_Any, State) ->
+	{next_state, playing_hands, State}.
 
-playing_hands(Any, _From, State) ->
+playing_hands(_Any, _From, State) ->
 	{reply, {error, unexpected_request}, playing_hands, State}.
 
 dealer(play_hand, #state{timer=Timer, seats=Seats, dealer=DHand, deck=Deck}=State) ->
@@ -160,13 +160,13 @@ dealer(play_hand, #state{timer=Timer, seats=Seats, dealer=DHand, deck=Deck}=Stat
 			{ok, NewDeck, NewCards} = play_dealer_hand(Deck, Cards),
 			notify_players(Seats, {play_dealer_hand, {cards, NewCards}, {score, bj_hand:compute(NewCards)}}),
 			send_self(2, payout_hands, Timer),
-			{next_state, finish_game, State#state{dealer=Seat#seat{cards=NewCards}, deck=NewDeck}}
+			{next_state, finish_game, State#state{dealer=DHand#seat{cards=NewCards}, deck=NewDeck}}
 	end.
 
-finish_game(payout_hands, #state{tablepid=TablePid, seats=Seats}=State) ->
+finish_game(payout_hands, #state{tablepid=TablePid, seats=Seats, dealer=Dealer}=State) ->
 	case anyone_playing(Seats) of
 		yes ->
-			ok = payout_hands(Seats);
+			ok = payout_hands(Seats, Dealer);
 		no ->
 			ok
 	end,
@@ -202,7 +202,7 @@ notify_players(Players, Msg) ->
 	lists:foreach(Notifier, Players),
 	ok.
 
-setup_seats([{Seat, {Pid, Name}}|Players]) ->
+setup_seats(Players) ->
 	SeatMaker = fun({Seat, {Pid, Name}}) -> {Seat, Pid, #seat{name=Name}} end,
 	{ok, lists:map(SeatMaker, Players)}.
 
@@ -212,10 +212,11 @@ initial_deal(Seats, Deck) ->
 initial_deal(Consumed, [], Deck) ->
 	{ok, Cards, NewDeck} = deck:draw(2, Deck), % The dealers hand
 	Seats = lists:reverse(Consumed),
-	HandTuple = fun({S, P, Seat}) -> {{seat, S}, {cards, Seat.cards}} end,
-	notify_players(Players, {update_table, lists:map(HandTuple, Seats)}),
+	HandTuple = fun({S, _P, Seat}) -> {{seat, S}, {cards, Seat#seat.cards}} end,
+	notify_players(Consumed, {update_table, lists:map(HandTuple, Seats)}),
 	{ok, Seats, #seat{cards=Cards}, NewDeck};
-initial_deal(Consumed, [{SeatN, Pid, #seat{pid=Pid,bet=Bet}=Seat}=S|Seats], Deck) ->
+
+initial_deal(Consumed, [{SeatN, Pid, #seat{bet=Bet}=Seat}=S|Seats], Deck) ->
 	if
 		Bet > 0 ->
 			{ok, Cards, NewDeck} = deck:draw(2, Deck),
@@ -236,7 +237,7 @@ play_dealer_hand(Deck, Cards, _Score) ->
 next_hand(N, _Seats) when N > 6 -> {ok, all_hands_played};
 next_hand(N, Seats) ->
 	case lists:keyfind(N + 1, 1, Seats) of
-		{N, Pid, #seat{bet=Bet}} when Bet > 0 ->
+		{N, _Pid, #seat{bet=Bet}} when Bet > 0 ->
 			N + 1;
 		false -> next_hand(N + 1, Seats)
 	end.
@@ -259,9 +260,8 @@ all_bets_in(Seats) ->
 	end.
 	
 
-payout_hands(Seats) ->
-	{ok, #seat{cards=Cards}} = dict:find(dealer, Seats),
-	DealerScore = bj_hand:compute(Cards),
+payout_hands(Seats, Dealer) ->
+	DealerScore = bj_hand:compute(Dealer#seat.cards),
 	payout_hands(next_hand(0, Seats), Seats, DealerScore).
 
 payout_hands(N, Seats, DealerScore) ->
@@ -280,7 +280,7 @@ payout_hands(N, Seats, DealerScore) ->
 						 _Score ->
 							 {lost, SeatN#seat.bet}
 					 end,
-	notify_players(Players, {update_table, {{seat, SeatN}, Action}}),
+	notify_players(Seats, {update_table, {{seat, SeatN}, Action}}),
 	case next_hand(N, Seats) of
 		{ok, all_hands_played} ->
 			ok;
