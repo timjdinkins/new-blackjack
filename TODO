@@ -1,4 +1,10 @@
-Start back in on the Player.
+I have finished refactoring the game so that it will send messages to players, instead of printing to the console.  It also now deals with players as a list of tuples instead of a dictionary.
+
+I need to now get it to compile, plus set up the user to handle the messages the game sends.
+
+I need to then set up the user to message it's proxy with the messages it gets from the game.
+
+#### Old 1
 
 I left off with refactoring the casino to track tables as lists, instead of more complex data types.
 
