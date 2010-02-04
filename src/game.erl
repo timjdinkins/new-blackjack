@@ -55,10 +55,10 @@ stay(Pid, Seat) ->
 %%%%%%%% Callbacks %%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-waiting({start_hand, TablePid, Seats, Deck}, #state{timer=Timer}=State) ->
+waiting({start_hand, TablePid, Seats}, #state{timer=Timer}=State) ->
 	ok = notify_players(Seats, {msg, "Starting a new game"}),
 	send_self(0, start_betting, Timer),
-	{next_state, betting, State#state{tablepid=TablePid, seats=Seats, deck=Deck}}.
+	{next_state, betting, State#state{tablepid=TablePid, seats=Seats, deck=deck:shuffled()}}.
 
 betting(start_betting, #state{timer=Timer, seats=Seats}=State) ->
 	ok = notify_players(Seats, {msg, "Place your bets"}),
@@ -81,9 +81,8 @@ betting({place_bet, SeatN, Amt}, #state{timer=Timer, seats=Seats}=State) ->
 	NewSeats = lists:keystore(SeatN, 1, Seats, {SeatN, Pid, Seat#seat{bet=Bet + Amt}}),
 	case all_bets_in(NewSeats) of
 		yes   -> send_self(0, end_betting, Timer);
-		_Any  -> 1 % don't to anything
 	end,
-	notify_players(Seats, {udpate_table, {{seat, SeatN}, {bet, Bet + Amt}}}),
+	notify_players(Seats, {update_table, {{seat, SeatN}, {bet, Bet + Amt}}}),
 	{next_state, betting, State#state{seats=NewSeats}};
 
 betting(_Any, State) ->
@@ -132,11 +131,13 @@ playing_hands({hit, SeatN}, #state{timer=Timer, seats=Seats, hand=SeatN, deck=De
 	
 	case bj_hand:compute(NewCards) of
 		Score when Score >= 21 ->
+			player:busted(Pid, NewCards),
 			notify_players(Seats, {update_table, {{seat, SeatN}, {action, busted}}}),
 			send_self(0, next_hand, Timer),
 			NewState = State#state{seats=NewSeats, deck=NewDeck};
-		_Score ->
-			notify_players(Seats, {update_table, {{seat, SeatN}, {cards, NewCards}}}),
+		Score ->
+			player:new_cards(Pid, NewCards, Score),
+			notify_players(Seats, {update_table, {{seat, SeatN}, {cards, NewCards}, {score, Score}}}),
 			notify(Pid, "Hit or stay?"),
 			send_self(30, next_hand, Timer),
 			NewState = State#state{seats=NewSeats, deck=NewDeck}
@@ -268,16 +269,22 @@ payout_hands(N, Seats, DealerScore) ->
 	SeatN = lists:keyfind(N, 1, Seats),
 	Action = case bj_hand:compute(SeatN#seat.cards) of
 						 Score when Score > 21 ->
+							 player:lost(SeatN#seat.pid, SeatN#seat.bet),
 						   {lost, SeatN#seat.bet};
 						 Score when Score =< 21, DealerScore > 21 ->
+							player:won(SeatN#seat.pid, SeatN#seat.bet),
 							 {won, SeatN#seat.bet};
 						 Score when Score == DealerScore ->
+							 player:tied(SeatN#seat.pid),
 							 {tie, 0};
 						 Score when Score >= DealerScore, Score == 21 ->
+							 player:won(SeatN#seat.pid, SeatN#seat.bet),
 							 {won, SeatN#seat.bet * 2};
 						 Score when Score >= DealerScore ->
+							 player:won(SeatN#seat.pid, SeatN#seat.bet),
 							 {won, SeatN#seat.bet};
 						 _Score ->
+							 player:lost(SeatN#seat.pid, SeatN#seat.bet),
 							 {lost, SeatN#seat.bet}
 					 end,
 	notify_players(Seats, {update_table, {{seat, SeatN}, Action}}),

@@ -3,24 +3,24 @@
 
 -record(table, {pid, seat}).
 -record(game, {pid, cards=[], bet=0}).
--record(state, {sid, name, stack=0, table=#table{}, game=#game{}}).
+-record(state, {proxy_pid, name, stack=0, table=#table{}, game=#game{}, messages=[]}).
 
 -export([start/3, start_link/3, init/1, stop/1, terminate/2]).
 -export([handle_cast/2]).
 
--export([find_table/1, join_table/2, bet/2, stay/1, new_cards/2, hit/1, notify/2]).
+-export([join_table/1, bet/2, stay/1, new_cards/2, hit/1, notify/2]).
 -export([paid/2, lost/2]).
 
-start(SID, Name, Stack) ->
-	gen_server:start(?MODULE, [SID, Name, Stack], []).
+start(Name, Stack) ->
+	gen_server:start(?MODULE, [Name, Stack], []).
 start_link(SID, Name, Stack) ->
-	gen_server:start_link(?MODULE, [SID, Name, Stack], []).
+	gen_server:start_link(?MODULE, [Name, Stack], []).
 
 stop(Pid) ->
 	gen_server:cast(Pid, stop).
 
-init([SID, Name, Stack]) ->
-	{ok, #state{sid=SID, name=Name, stack=Stack}}.
+init([Name, Stack]) ->
+	{ok, #state{name=Name, stack=Stack}}.
 
 terminate(_Reason, _Game) ->
 	ok.
@@ -42,24 +42,20 @@ hit(Pid) ->
 stay(Pid) ->
 	gen_server:cast(Pid, stay).
 
-new_cards(Pid, Cards) ->
-	gen_server:cast(Pid, {new_cards, Cards}).
+new_cards(Pid, Cards, Score) ->
+	gen_server:cast(Pid, {new_cards, Cards, Score}).
 
-paid(Pid, Amt) ->
+won(Pid, Amt) ->
 	gen_server:cast(Pid, {paid, Amt}).
 
 lost(Pid, Amt) ->
 	gen_server:cast(Pid, {lost, Amt}).
 
+tied(Pid) ->
+	gen_server:cast(Pid, tie).
+
 notify(Pid, Msg) ->
 	gen_server:cast(Pid, {notify, Msg}).
-
-msg_from_web_client(Pid, Msg) ->
-	case Msg of
-		{bet, Amt} -> bet(Pid, Amt);
-		hit 			 -> hit(Pid);
-		stay 			 -> stay(Pid)
-	end.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -67,61 +63,93 @@ msg_from_web_client(Pid, Msg) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
-handle_call(join_table, _From, #state{name=Name}=State) ->
+handle_cast(join_table, #state{name=Name}=State) ->
 	case casino:join_table(self(), Name) of
 		{table, Table, Game, Seat} ->
-			{reply, Msg, State#state{table=#table{pid=Table, seat=Seat}, game=#game{pid=Game}}};
+			{noreply, State#state{table=#table{pid=Table, seat=Seat}, game=#game{pid=Game}}};
 		{error, Msg}  ->
-			{reply, Msg, State}
+			{noreply, State}
 	end;
 
-handle_call({bet, Amt}, _From, #state{game=Game, table=Table, stack=Stack}=State) ->
+handle_cast({bet, Amt}, #state{game=Game, table=Table, stack=Stack}=State) ->
 	NewBet = Amt + Game#game.bet,
 	case NewBet > Stack of
 		false ->
-			case game:bet(Game#game.pid, Table#table.seat, Amt) of
-				{ok, NewBet} ->
-					{reply, {ok, NewBet}, State#state{game=Game#game{bet=NewBet}}};
-				Any ->
-					{reply, Any, State}
-			end;
+			game:bet(Game#game.pid, Table#table.seat, Amt),
+			{noreply, State#state{game=Game#game{bet=NewBet}}};
 		true ->
-			{reply, {error, overbet}, State}
+			notify_proxy(State, {msg, "Your stack is too small for that bet."}),
+			{noreply, State}
 	end;
 
-handle_call(hit, _From, #state{game=Game, table=Table}=State) ->
-	case game:hit(Game#game.pid, Table#table.seat) of
-		{ok, NewCards} ->
-			io:format("Your hand is now: ~p~n", [NewCards]),
-			io:format("Your hands score is: ~p~n", [bj_hand:compute(NewCards)]),
-			{reply, ok, State#state{game=Game#game{cards=NewCards}}};
-		{error, Msg} ->
-			io:format("Error: ~p~n", [Msg]),
-			{reply, error, State}
-	end.
+handle_cast(hit, #state{game=Game, table=Table}=State) ->
+	game:hit(Game#game.pid, Table#table.seat),
+	{noreply, State};
 	
 handle_cast(stay, #state{game=Game, table=Table}=State) ->
 	game:stay(Game#game.pid, Table#table.seat),
 	{noreply, State};
 
-handle_cast({new_cards, Cards}, #state{game=Game}=State) ->
-	io:format("Your hand is now: ~p~n", [Cards]),
-	io:format("Your hands score is: ~p~n", [bj_hand:compute(Cards)]),
+handle_cast({new_cards, Cards, Score}, #state{game=Game}=State) ->
+	notify_proxy(State, [{{new_cards, Cards}, {score, Score}]),
+	{noreply, State#state{game=Game#game{cards=Cards}}};
+
+handle_cast({busted, Cards}, #state{game=Game}=State) ->
+	notify_proxy(State, {action, busted}),
 	{noreply, State#state{game=Game#game{cards=Cards}}};
 
 handle_cast({paid, Amt}, #state{game=Game, stack=Stack}=State) ->
-	io:format("I won $~p~n", [Amt]),
-	io:format("Stack is now ~p~n", [Stack+Amt]),
+	notify_proxy(State, [{result, win}, {amt, Amt}, {stack, Stack + Amt}]),
 	{noreply, State#state{stack=Stack+Amt, game=Game#game{bet=0, cards=[]}}};
 
 handle_cast({lost, Amt}, #state{game=Game, stack=Stack}=State) ->
-	io:format("I lost $~p~n", [Amt]),
-	io:format("Stack is now ~p~n", [Stack-Amt]),
+	notify_proxy(State, [{result, lost}, {amt, Amt}, {stack, Stack - Amt}]),
 	{noreply, State#state{stack=Stack-Amt, game=Game#game{bet=0, cards=[]}}};
 
-handle_cast({notify, Msg}, State) ->
-	io:format("~p~n", [Msg]),
-	{noreply, State};
+handle_cast(tie, #state{game=Game, stack=Stack}=State) ->
+	notify_proxy(State, [{result, tie}, {stack, Stack}]),
+	{noreply, State#state{game=Game#game{bet=0, cards=[]}}};
+
+%%
+% Whenever we send a message to the proxy, we remove it's pid.
+% After a proxy receives a message, it has to reregister it's pid.
+%%
+handle_cast({notify, Msg}, state=#state{proxy_pid=Pid, messages=Ms}) ->
+	NewMessages = [Msg|Ms],
+	case Pid of
+		undefined ->
+			{noreply, State#state{messages=NewMessages}};
+		_  				->
+			% Reverse the list as the newest will be first otherwise
+			notify_proxy(State, lists:reverse(NewMessages)),
+			{noreply, State#state{proxy_pid=undefined}};
+	end;
+
+handle_cast({register_proxy, Pid}, #state{proxy_pid=Pid, messages=Ms}=State) ->
+	case Ms of
+		[] ->
+			{noreply, State#state{proxy_pid=Pid}};
+		_  ->
+			notify_proxy(State, []),
+			{notify_proxy, State#state{messages=[]}}
+	end;
 
 handle_cast(stop, State) ->
 	{stop, normal, State}.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%% Private API %%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+notify_proxy(#state{proxy_pid=Pid, messages=Ms}=State, Msg) ->
+	NewMs = case Msg of
+						[] -> Ms;
+						_  -> [Msg|Ms]
+					end,
+	case proxy_pid of
+		undefined ->
+			State#state{messages=NewMs};
+		Pid ->
+			Pid ! lists:reverse(NewMs),
+			State#state{messages=[]}
+	end.
