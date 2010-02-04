@@ -5,15 +5,13 @@
 -record(game, {pid, cards=[], bet=0}).
 -record(state, {proxy_pid, name, stack=0, table=#table{}, game=#game{}, messages=[]}).
 
--export([start/3, start_link/3, init/1, stop/1, terminate/2]).
+-export([start_link/2, init/1, stop/1, terminate/2]).
 -export([handle_cast/2]).
 
--export([join_table/1, bet/2, stay/1, new_cards/2, hit/1, notify/2]).
--export([paid/2, lost/2]).
+-export([join_table/1, bet/2, stay/1, hit/1, notify/2]).
+-export([won/2, lost/2, tied/1, new_cards/3]).
 
-start(Name, Stack) ->
-	gen_server:start(?MODULE, [Name, Stack], []).
-start_link(SID, Name, Stack) ->
+start_link(Name, Stack) ->
 	gen_server:start_link(?MODULE, [Name, Stack], []).
 
 stop(Pid) ->
@@ -31,13 +29,13 @@ terminate(_Reason, _Game) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 join_table(Pid) ->
-	gen_server:call(Pid, join_table).
+	gen_server:cast(Pid, join_table).
 
 bet(Pid, Amt) ->
-	gen_server:call(Pid, {bet, Amt}).
+	gen_server:cast(Pid, {bet, Amt}).
 
 hit(Pid) ->
-	gen_server:call(Pid, hit).
+	gen_server:cast(Pid, hit).
 
 stay(Pid) ->
 	gen_server:cast(Pid, stay).
@@ -65,9 +63,10 @@ notify(Pid, Msg) ->
 
 handle_cast(join_table, #state{name=Name}=State) ->
 	case casino:join_table(self(), Name) of
-		{table, Table, Game, Seat} ->
+		{ok, Table, Game, Seat} ->
 			{noreply, State#state{table=#table{pid=Table, seat=Seat}, game=#game{pid=Game}}};
-		{error, Msg}  ->
+		{error, _Msg}  ->
+			notify_proxy(State, {msg, "Joining the table failed.  Try again later."}),
 			{noreply, State}
 	end;
 
@@ -91,7 +90,7 @@ handle_cast(stay, #state{game=Game, table=Table}=State) ->
 	{noreply, State};
 
 handle_cast({new_cards, Cards, Score}, #state{game=Game}=State) ->
-	notify_proxy(State, [{{new_cards, Cards}, {score, Score}]),
+	notify_proxy(State, [{new_cards, Cards}, {score, Score}]),
 	{noreply, State#state{game=Game#game{cards=Cards}}};
 
 handle_cast({busted, Cards}, #state{game=Game}=State) ->
@@ -114,7 +113,7 @@ handle_cast(tie, #state{game=Game, stack=Stack}=State) ->
 % Whenever we send a message to the proxy, we remove it's pid.
 % After a proxy receives a message, it has to reregister it's pid.
 %%
-handle_cast({notify, Msg}, state=#state{proxy_pid=Pid, messages=Ms}) ->
+handle_cast({notify, Msg}, #state{proxy_pid=Pid, messages=Ms}=State) ->
 	NewMessages = [Msg|Ms],
 	case Pid of
 		undefined ->
@@ -122,7 +121,7 @@ handle_cast({notify, Msg}, state=#state{proxy_pid=Pid, messages=Ms}) ->
 		_  				->
 			% Reverse the list as the newest will be first otherwise
 			notify_proxy(State, lists:reverse(NewMessages)),
-			{noreply, State#state{proxy_pid=undefined}};
+			{noreply, State#state{proxy_pid=undefined}}
 	end;
 
 handle_cast({register_proxy, Pid}, #state{proxy_pid=Pid, messages=Ms}=State) ->

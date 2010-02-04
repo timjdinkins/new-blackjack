@@ -1,10 +1,11 @@
 -module(casino).
+
 -behavior(gen_server).
 
 -export([start_link/0, init/1, stop/0, terminate/2]).
 -export([handle_call/3, handle_cast/2, handle_info/2]).
 
--export([join_table/1, leave_table/1, close_table/1]).
+-export([join_table/2, leave_table/1, close_table/1]).
 
 -record(state, {full_tables=[], open_tables=[]}).
 
@@ -33,7 +34,7 @@ terminate(_Reason, _LoopData) ->
 
 %% Callbacks
 handle_call({join_table, Pid, Name}, _From, #state{open_tables=[T1|OpenTables]}=State) ->
-	case join_table({Pid, Name}, T1) of
+	case try_join_table({Pid, Name}, T1) of
 		{open, Table} ->
 			NewState = State#state{open_tables=[Table|OpenTables]};
 		{full, Table} ->
@@ -80,7 +81,7 @@ handle_info(timeout, State) ->
 	{noreply, State#state{open_tables=[new_table()]}}.
 
 %% Private API
-join_table(Player, {Pid, Cnt, Players}) ->
+try_join_table(Player, {Pid, Cnt, Players}) ->
 	NTable = {Pid, Cnt + 1, [Player|Players]},
 	case Cnt + 1 of
 		I when I > 7 ->

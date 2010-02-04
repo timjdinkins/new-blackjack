@@ -36,8 +36,7 @@ terminate(Reason, StateName, _State) ->
 
 start_hand(Pid, TablePid, Players) ->
 	{ok, Seats} = setup_seats(Players),
-	{ok, Deck}  = deck:shuffled(),
-	gen_fsm:send_event(Pid, {start_hand, TablePid, Seats, Deck}).
+	gen_fsm:send_event(Pid, {start_hand, TablePid, Seats}).
 
 stop_hand(Pid) ->
 	gen_fsm:send_all_state_event(Pid, stop_hand).
@@ -57,7 +56,7 @@ stay(Pid, Seat) ->
 
 waiting({start_hand, TablePid, Seats}, #state{timer=Timer}=State) ->
 	ok = notify_players(Seats, {msg, "Starting a new game"}),
-	send_self(0, start_betting, Timer),
+	send_self(1, start_betting, Timer),
 	{next_state, betting, State#state{tablepid=TablePid, seats=Seats, deck=deck:shuffled()}}.
 
 betting(start_betting, #state{timer=Timer, seats=Seats}=State) ->
@@ -80,7 +79,7 @@ betting({place_bet, SeatN, Amt}, #state{timer=Timer, seats=Seats}=State) ->
 	{SeatN, Pid, #seat{bet=Bet}=Seat} = lists:keyfind(SeatN, 1, Seats),
 	NewSeats = lists:keystore(SeatN, 1, Seats, {SeatN, Pid, Seat#seat{bet=Bet + Amt}}),
 	case all_bets_in(NewSeats) of
-		yes   -> send_self(0, end_betting, Timer);
+		yes   -> send_self(0, end_betting, Timer)
 	end,
 	notify_players(Seats, {update_table, {{seat, SeatN}, {bet, Bet + Amt}}}),
 	{next_state, betting, State#state{seats=NewSeats}};
@@ -193,7 +192,8 @@ handle_event(stop, _StateName, Timer) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 send_self(Secs, Msg, Timer) ->
-	ok = game_timer:set_timeout(Timer, {Secs, fun() -> gen_fsm:send_event(self(), Msg) end}).
+	Pid = self(), % I have to reference this this way so the Pid is my procs pid, not the timer's.
+	ok = game_timer:set_timeout(Timer, {Secs, fun() -> gen_fsm:send_event(Pid, Msg) end}).
 
 notify(Pid, Msg) ->
 	player:notify(Pid, Msg).
@@ -266,26 +266,26 @@ payout_hands(Seats, Dealer) ->
 	payout_hands(next_hand(0, Seats), Seats, DealerScore).
 
 payout_hands(N, Seats, DealerScore) ->
-	SeatN = lists:keyfind(N, 1, Seats),
-	Action = case bj_hand:compute(SeatN#seat.cards) of
+	{SeatN, Pid, SeatRec} = lists:keyfind(N, 1, Seats),
+	Action = case bj_hand:compute(SeatRec#seat.cards) of
 						 Score when Score > 21 ->
-							 player:lost(SeatN#seat.pid, SeatN#seat.bet),
-						   {lost, SeatN#seat.bet};
+							 player:lost(Pid, SeatRec#seat.bet),
+						   {lost, SeatRec#seat.bet};
 						 Score when Score =< 21, DealerScore > 21 ->
-							player:won(SeatN#seat.pid, SeatN#seat.bet),
-							 {won, SeatN#seat.bet};
+							player:won(Pid, SeatRec#seat.bet),
+							 {won, SeatRec#seat.bet};
 						 Score when Score == DealerScore ->
-							 player:tied(SeatN#seat.pid),
+							 player:tied(Pid),
 							 {tie, 0};
 						 Score when Score >= DealerScore, Score == 21 ->
-							 player:won(SeatN#seat.pid, SeatN#seat.bet),
-							 {won, SeatN#seat.bet * 2};
+							 player:won(Pid, SeatRec#seat.bet),
+							 {won, SeatRec#seat.bet * 2};
 						 Score when Score >= DealerScore ->
-							 player:won(SeatN#seat.pid, SeatN#seat.bet),
-							 {won, SeatN#seat.bet};
+							 player:won(Pid, SeatRec#seat.bet),
+							 {won, SeatRec#seat.bet};
 						 _Score ->
-							 player:lost(SeatN#seat.pid, SeatN#seat.bet),
-							 {lost, SeatN#seat.bet}
+							 player:lost(Pid, SeatRec#seat.bet),
+							 {lost, SeatRec#seat.bet}
 					 end,
 	notify_players(Seats, {update_table, {{seat, SeatN}, Action}}),
 	case next_hand(N, Seats) of
