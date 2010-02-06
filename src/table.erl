@@ -4,7 +4,7 @@
 -record(game, {pid=null, players=[]}).
 
 -export([start/0, start_link/0, init/1, stop/1, terminate/3]).
--export([handle_event/3, handle_sync_event/4]).
+-export([handle_event/3]).
 
 -export([empty_table/3, playing/2, playing/3]).
 
@@ -44,19 +44,23 @@ game_complete(Pid, Quiters) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%% Callbacks %%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
-empty_table({seat_player, Player}, _From, #game{pid=GamePid}=Game) ->
-	NewGame = Game#game{players=[{0, Player}]},
-	ok = game:start_hand(GamePid, self(), [{0, Player}]),
-	{reply, {ok, 0, GamePid}, playing, NewGame}.
+%%
+%% Player is {Pid, Name}
+%%
+empty_table({seat_player, {Pid, Name}}, _From, #game{pid=GamePid}=Game) ->
+	NewGame = Game#game{players=[{1, Pid, Name}]},
+	ok = game:start_hand(GamePid, self(), [{1, Pid, Name}]),
+	{reply, {ok, 1, GamePid}, playing, NewGame}.
 	
-playing({seat_player, Player}, _From, #game{pid=GamePid, players=Players}=Game) ->
-	{Seat, Ps} = add_player(Player, Players),
+playing({seat_player, {Pid, Name}}, _From, #game{pid=GamePid, players=Players}=Game) ->
+	{Seat, Ps} = add_player({Pid, Name}, Players),
 	{reply, {ok, Seat, GamePid}, playing, Game#game{players=Ps}}.
 
 playing({game_complete, Quiters}, #game{pid=Pid, players=Players}=Game) ->
 	NewPlayers = remove_quiters(Players, Quiters),
 	case length(NewPlayers) of
 		L when L > 0 ->
+			io:format("Number of players at table: ~p~n.", [L]),
 			ok = game:start_hand(Pid, self(), NewPlayers),
 			{next_state, playing, Game#game{players=NewPlayers}};
 		_Else ->
@@ -66,10 +70,6 @@ playing({game_complete, Quiters}, #game{pid=Pid, players=Players}=Game) ->
 playing(timeout, #game{pid=Pid, players=Players}=Game) ->
 	ok = game:start_hand(Pid, self(), Players),
 	{next_state, playing, Game}.
-
-handle_sync_event(print_players, _From, StateName, #game{players=Players}=Game) ->
-	io:format("~p~n", Players),
-	{next_state, StateName, Game}.
 
 handle_event(stop, _StateName, #game{pid=Pid, players=_Players}=Game) ->
 	%% Tell the players we stopped this table
@@ -84,10 +84,9 @@ handle_event(stop, _StateName, #game{pid=Pid, players=_Players}=Game) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 remove_quiters(Players, []) ->
 	Players;
-remove_quiters(Players, [Player|Quiters]) ->
-	remove_quiters(lists:delete(Player, Players), Quiters).
+remove_quiters(Players, [Pid|Quiters]) ->
+	remove_quiters(lists:keydelete(Pid, 2, Players), Quiters).
 
-add_player(P, Ps) ->
-	[Fst|_] = lists:subtract(lists:seq(0,7), [I || {I,_} <- Ps]),
-	{Fst, lists:keysort(1, [{Fst, P}|Ps])}
-	.
+add_player({Pid, Name}, Ps) ->
+	[Fst|_] = lists:subtract(lists:seq(1,6), [I || {I,_} <- Ps]),
+	{Fst, lists:keysort(1, [{Fst, Pid, Name}|Ps])}.
