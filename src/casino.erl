@@ -27,6 +27,7 @@ close_table(Pid) ->
 
 %% Internal API
 init([]) ->
+	process_flag(trap_exit, true),
 	{ok, #state{}, 0}.
 
 terminate(_Reason, _LoopData) ->

@@ -5,12 +5,7 @@
 -export([start/2, stop/1]).
 
 start(_Type, _StartArgs) ->
-	case bj_sup:start_link() of
-		{ok, Pid} ->
-			{ok, Pid};
-		Error ->
-			Error
-	end.
+	bj_sup:start_link().
 
 stop(_State) ->
 	ok.

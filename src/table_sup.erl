@@ -13,4 +13,5 @@ init([]) ->
 	{ok, {{simple_one_for_one, 1, 1}, [Table]}}.
 
 start_table() ->
+	process_flag(trap_exit, true),
 	supervisor:start_child(table_sup, []).

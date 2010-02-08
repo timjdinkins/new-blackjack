@@ -13,6 +13,7 @@ stop() ->
 	gen_server:cast(?MODULE, stop).
 
 init([]) ->
+	process_flag(trap_exit, true),
 	{ok, dict:new()}.
 
 terminate(_Reason, _State) ->

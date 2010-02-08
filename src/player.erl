@@ -18,6 +18,7 @@ stop(Pid) ->
 	gen_server:cast(Pid, stop).
 
 init([Name, Stack]) ->
+	process_flag(trap_exit, true),
 	{ok, #state{name=Name, stack=Stack}}.
 
 terminate(_Reason, _Game) ->

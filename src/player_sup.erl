@@ -14,6 +14,7 @@ stop() ->
 	ok.
 
 init([]) ->
+	process_flag(trap_exit, true),
 	Player = {null, {player, start_link, []}, temporary, brutal_kill, worker, [player]},
 	{ok, {{simple_one_for_one, 1, 1}, [Player]}}.
 

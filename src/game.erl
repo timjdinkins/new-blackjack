@@ -19,6 +19,7 @@ stop(Pid) ->
 	gen_fsm:send_all_state_event(Pid, stop).
 
 init([]) ->
+	process_flag(trap_exit, true),
 	{ok, Timer} = game_timer:start_link(),
 	{ok, waiting, #state{timer=Timer}}.
 
