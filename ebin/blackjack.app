@@ -7,6 +7,6 @@
 		{modules, [casino_sup, table_sup]},
 		{registered, [casino_sup, table_sup]},
 		{applications, [kernel, stdlib]},
-		{mod, {bj_app, []}}
+		{mod, {blackjack, []}}
 	]
 }.
