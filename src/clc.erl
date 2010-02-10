@@ -1,12 +1,12 @@
--module(cl).
+-module(clc).
 
 -behaviour(gen_server).
 
--export([start_link/2, stop/1, terminate/2, init/1, handle_cast/2]).
+-export([start/1, stop/1, terminate/2, init/1, handle_cast/2]).
 -export([join_table/1, bet/2, hit/1, stay/1]).
 
-start_link(Name, Stack) ->
-	gen_server:start_link(?MODULE, [Name, Stack], []).
+start(Name) ->
+	gen_server:start(?MODULE, [Name], []).
 
 stop(Pid) ->
 	gen_server:cast(Pid, stop).
@@ -14,8 +14,8 @@ stop(Pid) ->
 terminate(_Reason, _State) ->
 	ok.
 
-init([Name, Stack]) ->
-	{ok, PlayerPid} = player_sup:start_player(Name, Stack),
+init([Name]) ->
+	{ok, PlayerPid} = registry:register(Name),
 	player:join_table(PlayerPid),
 	register(PlayerPid),
 	{ok, PlayerPid}.

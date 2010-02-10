@@ -12,6 +12,7 @@
 -export([won/2, lost/2, tied/1, new_cards/3, busted/3]).
 
 start_link(Name, Stack) ->
+	io:format("Starting player, with name: ~p~n", [Name]),
 	gen_server:start_link(?MODULE, [Name, Stack], []).
 
 stop(Pid) ->
@@ -73,8 +74,9 @@ handle_cast(join_table, #state{proxy_pid=Pid, name=Name, messages=Messages}=Stat
 		{ok, Table, Game, Seat} ->
 			{noreply, State#state{table=#table{pid=Table, seat=Seat}, game=#game{pid=Game}}};
 		{error, _Msg}  ->
-			Ms = notify_proxy(Pid, [{msg, "Joining the table failed.  Try again later."}|Messages]),
-			{noreply, State#state{messages=Ms}}
+			% {NPid, Ms} = notify_proxy(Pid, [{obj, [{msg, <<"Joining the table failed.  Try again later.">>}]}|Messages]),
+			{NPid, Ms} = notify_proxy(Pid, wh:enc(msg, "Joining the table failed.  Try again later.", Messages)),
+			{noreply, State#state{proxy_pid=NPid, messages=Ms}}
 	end;
 
 handle_cast({bet, Amt}, #state{proxy_pid=Pid, game=Game, stack=Stack, messages=Messages}=State) ->
@@ -83,8 +85,8 @@ handle_cast({bet, Amt}, #state{proxy_pid=Pid, game=Game, stack=Stack, messages=M
 			game:bet(Game#game.pid, {self(), Amt}),
 			{noreply, State#state{game=Game#game{bet=NewBet}}};
 		_Any ->
-			Ms = notify_proxy(Pid, [{msg, "Your stack is too small for that bet."}|Messages]),
-			{noreply, State#state{messages=Ms}}
+			{NPid, Ms} = notify_proxy(Pid, wh:enc(msg, "Your stack is too small for that bet.", Messages)),
+			{noreply, State#state{proxy_pid=NPid, messages=Ms}}
 	end;
 
 handle_cast(hit, #state{game=Game}=State) ->
@@ -96,46 +98,44 @@ handle_cast(stay, #state{game=Game}=State) ->
 	{noreply, State};
 
 handle_cast({new_cards, Cards, Score}, #state{proxy_pid=Pid, game=Game, messages=Messages}=State) ->
-	Ms = notify_proxy(Pid, [{new_cards, Cards}, {score, Score}|Messages]),
-	{noreply, State#state{game=Game#game{cards=Cards}, messages=Ms}};
+	{NPid, Ms} = notify_proxy(Pid, wh:enc([{new_cards, wh:json_cards(Cards)}, {score, Score}], Messages)),
+	{noreply, State#state{game=Game#game{cards=Cards}, proxy_pid=NPid, messages=Ms}};
 
 handle_cast({busted, Cards, Score}, #state{proxy_pid=Pid, game=Game, messages=Messages}=State) ->
-	Ms = notify_proxy(Pid, [{action, busted}, {score, Score}|Messages]),
-	{noreply, State#state{game=Game#game{cards=Cards}, messages=Ms}};
+	{NPid, Ms} = notify_proxy(Pid, wh:enc([{action, <<"busted">>}, {score, Score}], Messages)),
+	{noreply, State#state{game=Game#game{cards=Cards}, proxy_pid=NPid, messages=Ms}};
 
 handle_cast({paid, Amt}, #state{proxy_pid=Pid, game=Game, stack=Stack, messages=Messages}=State) ->
-	Ms = notify_proxy(Pid, [{result, won}, {amt, Amt}, {stack, Stack + Amt}|Messages]),
-	{noreply, State#state{stack=Stack+Amt, game=Game#game{bet=0, cards=[]}, messages=Ms}};
+	{NPid, Ms} = notify_proxy(Pid, wh:enc([{result, <<"won">>}, {amt, Amt}, {stack, Stack + Amt}], Messages)),
+	{noreply, State#state{stack=Stack+Amt, game=Game#game{bet=0, cards=[]}, proxy_pid=NPid, messages=Ms}};
 
 handle_cast({lost, Amt}, #state{proxy_pid=Pid, game=Game, stack=Stack, messages=Messages}=State) ->
-	Ms = notify_proxy(Pid, [{result, lost}, {amt, Amt}, {stack, Stack - Amt}|Messages]),
-	{noreply, State#state{stack=Stack-Amt, game=Game#game{bet=0, cards=[]}, messages=Ms}};
+	{NPid, Ms} = notify_proxy(Pid, wh:enc([{result, <<"lost">>}, {amt, Amt}, {stack, Stack - Amt}], Messages)),
+	{noreply, State#state{stack=Stack-Amt, game=Game#game{bet=0, cards=[]}, proxy_pid=NPid, messages=Ms}};
 
 handle_cast(tie, #state{proxy_pid=Pid, game=Game, stack=Stack, messages=Messages}=State) ->
-	Ms = notify_proxy(Pid, [{result, tie}, {stack, Stack}|Messages]),
-	{noreply, State#state{game=Game#game{bet=0, cards=[]}, messages=Ms}};
+	{NPid, Ms} = notify_proxy(Pid, wh:enc([{result, <<"tie">>}, {stack, Stack}], Messages)),
+	{noreply, State#state{game=Game#game{bet=0, cards=[]}, proxy_pid=NPid, messages=Ms}};
 
 %%
 % Whenever we send a message to the proxy, we remove it's pid.
 % After a proxy receives a message, it has to reregister it's pid.
 %%
-handle_cast({notify, Msg}, #state{proxy_pid=Pid, messages=Messages}=State) ->
-	NMs = case Msg of
-					Msg when is_list(Msg) ->
-						Msg ++ Messages;
-					Msg ->
-						[Msg|Messages]
-				end,
-	Ms = notify_proxy(Pid, NMs),
-	{noreply, State#state{messages=Ms}};
+handle_cast({notify, Msg}, #state{proxy_pid=Pid, messages=Messages}=State) when is_list(Msg) ->
+	{NPid, Ms} = notify_proxy(Pid, lists:append(Msg, Messages)),
+	{noreply, State#state{proxy_pid=NPid, messages=Ms}};
+
+handle_cast({notify, {K, V}} #state{proxy_pid=Pid, messages=Messages}=State) ->
+	{NPid, Ms} = notify_proxy(Pid, [enc({K, V})|Messages]),
+	{noreply, State#state{proxy_pid=NPid, messages=Ms}};
 
 handle_cast({register_proxy, Pid}, #state{proxy_pid=_Pid, messages=Ms}=State) ->
 	case Ms of
 		[] ->
 			{noreply, State#state{proxy_pid=Pid}};
-		_  ->
-			notify_proxy(Pid, State#state.messages),
-			{notify_proxy, State#state{proxy_pid=undefined, messages=[]}}
+		Ms  ->
+			notify_proxy(Pid, Ms),
+			{noreply, State#state{proxy_pid=undefined, messages=[]}}
 	end;
 
 handle_cast(stop, State) ->
@@ -146,10 +146,11 @@ handle_cast(stop, State) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 notify_proxy(Pid, Ms) ->
+	io:format("Player =>> Proxy: ~p~n", [Ms]),
 	case Pid of
 		undefined ->
-			Ms;
+			{Pid, Ms};
 		Pid ->
 			gen_server:cast(Pid, lists:reverse(Ms)),
-			[]
+			{undefined, []}
 	end.

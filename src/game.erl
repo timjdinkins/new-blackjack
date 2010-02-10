@@ -27,7 +27,6 @@ terminate(Reason, StateName, _State) ->
 	io:format("Terminating in state ~p: ~p~n", [StateName, Reason]),
 	ok.
 
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%% Public API %%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -81,7 +80,7 @@ betting({place_bet, Pid, Amt}, #state{timer=Timer, seats=Seats}=State) ->
 	case all_bets_in(NewSeats) of
 		yes   -> send_self(0, end_betting, Timer)
 	end,
-	notify_players(Seats, {update_table, {{seat, SeatN}, {bet, Bet + Amt}}}),
+	notify_players(Seats, [{action, <<"update_table">>}, {seat, SeatN}, {bet, Bet + Amt}]),
 	{next_state, betting, State#state{seats=NewSeats}};
 
 betting(Any, State) ->
@@ -122,10 +121,10 @@ playing_hands({stay, Pid}, #state{timer=Timer, seats=Seats, hand=SeatN}=State) -
 	% Make sure the correct player is playing
 	case lists:keyfind(Pid, 2, Seats) of
 		{SeatN, Pid, _} ->
-			notify_players(Seats, {update_table, {{seat, SeatN}, {action, stay}}}),
+			notify_players(Seats, [{action, <<"update_table">>}, {seat, SeatN}, {action, <<"stay">>}]),
 			send_self(2, next_hand, Timer);
 		_ ->
-			notify(Pid, "Sorry, it's not your turn.")
+			notify(Pid, {msg, "Sorry, it's not your turn."})
 	end,
 	{next_state, playing_hands, State};
 
@@ -140,19 +139,19 @@ playing_hands({hit, Pid}, #state{timer=Timer, seats=Seats, hand=SeatN, deck=Deck
 			case bj_hand:compute(NewCards) of
 				Score when Score > 21 ->
 					player:busted(Pid, NewCards, Score),
-					notify_players(Seats, {update_table, {{seat, SeatN}, {action, busted}}}),
+					notify_players(Seats, [{action, <<"update_table">>}, {seat, SeatN}, {action, <<"busted">>}]),
 					send_self(2, next_hand, Timer),
 					NewState = State#state{seats=NewSeats, deck=NewDeck};
 				Score ->
 					player:new_cards(Pid, NewCards, Score),
-					notify_players(Seats, {update_table, {{seat, SeatN}, {cards, NewCards}, {score, Score}}}),
-					notify(Pid, {msg, "Hit or stay?"}),
+					notify_players(Seats, [{action, <<"update_table">>}, {seat, SeatN}, {cards, wh:json_cards(NewCards)}, {score, Score}]),
+					notify(Pid, wh:enc(msg, "Hit or stay?")),
 					send_self(30, next_hand, Timer),
 					NewState = State#state{seats=NewSeats, deck=NewDeck}
 			end,
 			{next_state, playing_hands, NewState};
 		_ ->
-			notify(Pid, "Sorry, it's not your turn."),
+			notify(Pid, {msg, "Sorry, it's not your turn."}),
 			{next_state, playing_hands, State}
 	end;
 
@@ -169,10 +168,9 @@ dealer(play_hand, #state{timer=Timer, seats=Seats, dealer=Dealer, deck=Deck}=Sta
 			{next_state, finish_game, State};
 		_Else ->
 			Cards = Dealer#seat.cards,
-			Message = lists:flatten(io_lib:format("The dealer's hand is ~p", [Cards])),
-			notify_players(Seats, {msg, Message}),
+			notify_players(Seats, [{action, <<"update_table">>}, {seat, <<"dealer">>}, {cards, wh:json_cards(Cards)}]),
 			{ok, NewDeck, NewCards} = play_dealer_hand(Deck, Cards),
-			notify_players(Seats, {update_table, {{dealer, NewCards}, {score, bj_hand:compute(NewCards)}}}),
+			notify_players(Seats, [{action, <<"update_table">>}, {seat, <<"dealer">>}, {cards, wh:json_cards(NewCards)}, {score, bj_hand:compute(NewCards)}]),
 			send_self(2, payout_hands, Timer),
 			{next_state, finish_game, State#state{dealer=Dealer#seat{cards=NewCards}, deck=NewDeck}}
 	end.
@@ -188,13 +186,7 @@ finish_game(payout_hands, #state{tablepid=TablePid, seats=Seats, dealer=Dealer}=
 	table:game_complete(TablePid, [Pid || {_, Pid, _} <- Quiters]),
 	{next_state, waiting, State}.
 
-handle_event(stop_game, StateName, Timer) ->
-	case StateName of
-		waiting ->
-			ok;
-		_AnyState ->
-			io:format("Sorry, I have to end this game right now~n", [])
-	end,
+handle_event(stop_game, _StateName, Timer) ->
 	{next_state, waiting, Timer};
 
 handle_event(stop, _StateName, Timer) ->
@@ -227,8 +219,11 @@ initial_deal(Seats, Deck) ->
 initial_deal(Consumed, [], Deck) ->
 	{ok, Cards, NewDeck} = deck:draw(2, Deck), % The dealers hand
 	Seats = lists:reverse(Consumed),
-	HandTuple = fun({S, _P, Seat}) -> {{seat, S}, {cards, Seat#seat.cards}} end,
-	notify_players(Consumed, {update_table, lists:map(HandTuple, Seats)}),
+	Notify = fun({S, _P, Seat}) ->
+		M = [{action, <<"update_table">>}, {seat, S}, {cards, wh:json_cards(Seat#seat.cards)}],
+		notify_players(Seats, M)
+	end,
+	lists:foreach(Notify, Seats),
 	{ok, Seats, #seat{cards=Cards}, NewDeck};
 
 initial_deal(Consumed, [{SeatN, Pid, #seat{bet=Bet}=Seat}=S|Seats], Deck) ->
@@ -300,7 +295,7 @@ payout_hands(N, Seats, DealerScore) ->
 							 player:lost(Pid, SeatRec#seat.bet),
 							 {lost, SeatRec#seat.bet}
 					 end,
-	notify_players(Seats, {update_table, {{seat, SeatN}, Action}}),
+	notify_players(Seats, [{action, <<"update_table">>}, {seat, SeatN}, Action]),
 	case next_hand(N, Seats) of
 		{ok, all_hands_played} ->
 			ok;

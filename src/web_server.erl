@@ -1,68 +1,106 @@
 -module(web_server).
 
--export([start/1, stop/0, dispatch_request/1]).
+-export([start/0, start/1, stop/0, dispatch_request/2]).
+
+start() ->
+	start(9000).
 
 start(Port) ->
-	mochiweb_http:start([{port, Port}, {loop, fun dispatch_request/1}]).
+	{_File, Path} = code:is_loaded(?MODULE),
+	DocRoot = filename:join([filename:dirname(filename:dirname(Path))|["public_html"]]),
+	mochiweb_http:start([{port, Port}, {loop, fun(Req) -> dispatch_request(Req, DocRoot) end}]).
 
 stop() ->
 	mochiweb_http:stop().
 
-json_ok(Req, Msgs) -> json_respond("ok", Msgs, Req).
-json_error(Req, Msgs) -> json_respond("error", Msgs, Req).
+dispatch_request(Req, DocRoot) ->
+	"/" ++ Path = Req:get(path),
+	case Req:get(method) of
+    Method when Method =:= 'GET'; Method =:= 'HEAD' ->
+			Req:serve_file(Path, DocRoot);
+    'POST' ->
+			Action = wh:clean_path(Path),
+			handle_action(Action, Req);
+		_ ->
+			Req:respond({501, [], []})
+	end.
 
-json_respond(Status, Msgs, Req) -> Req:ok({"text/json", [], json_msg(Status, Msgs)}).
-json_msg(Status, Msgs) ->
-	lists:flatten(rfc4627:encode({obj, [{"status", <<Status>>}, Msgs]})).
-
-listen(Req, SID) ->
-	player:listen(SID, self()),
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%% Main Loop %%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+listen(Req, Pid) ->
+	player:register_proxy(Pid, self()),
 	receive
-		timeout -> json_ok(Req, {action, reconnect});
-		{messages, Msgs} -> json_ok(Req, Msgs)
+		timeout -> json_ok(Req, {action, "reconnect"});
+		{'$gen_cast', Msgs} ->
+			io:format("Message from Player in listen loop: ~p~n", [Msgs]),
+			json_ok(Req, Msgs);
+		Any ->
+			io:format("Unknown message in listen loop: ~p~n", [Any]),
+			json_ok(Req, {unknown, Any})
 	end.
 
-timeout_listen(Pid) -> Pid ! timeout.
+handle_action("register", Req) ->
+	Name = wh:get_param(Req, "name"),
+	case registry:register(Name) of
+		{ok, _Pid} -> json_ok(Req, {ok, "registered"});
+		{error, Reason} -> json_ok(Req, {error, Reason})
+	end;
 
-dispatch_request(Req) ->
-	Path = Req:get(path),
-	Action = clean_path(Path),
-	handle_action(Action, Req).
+handle_action("listen", Req) ->
+	Name = wh:get_param(Req, "name"),
+	case registry:get_pid(Name) of
+		{ok, Pid} ->
+			timer:send_after(30000, self(), timeout),
+			listen(Req, Pid);
+		{error, Reason} ->
+			json_error(Req, Reason)
+	end;
 
-handle_action("/bet", Req) ->
-	SID = get_sid(Req),
-	Amt = get_param(Req, "amt"),
-	send_player(SID, {bet, Amt}),
-	json_ok(Req, {response, ok});
-
-handle_action("/listen", Req) ->
-	SID = get_sid(Req),
-	timer:apply_after(30000, ?MODULE, timeout_listen, [self()]),
-	wait(Req, SID);
-
-handle_action("/register", Req) ->
-	Name = get_param(Req, "name"),
-	% Impliment This!!!
-	SID = player_registry:generate_sid(),
-	{ok, Pid} = player:start(SID, Name, 200),
-	player_registry:register_sid(SID, Pid),
-	json_ok(Req, {sid, <<SID>>}).
-
-clean_path(Path) ->
-	case string:str(Path, "?") of
-		0 ->
-			Path;
-		N ->
-			string:substr(Path, 1, string:len(Path) - (N + 1))
+handle_action("action", Req) ->
+	Name = wh:get_param(Req, "name"),
+	Action = wh:get_param(Req, "action"),
+	io:format("Action request for: ~p -> ~p~n", [Name, Action]),
+	case registry:get_pid(Name) of
+		{ok, Pid} ->
+			case Action of
+				"join_table" -> join_table(Pid, Req);
+				"bet" -> bet(Pid, Req);
+				"hit" -> hit(Pid, Req);
+				"stay" -> stay(Pid, Req)
+			end,
+			json_ok(Req, {ok, "ok"});
+		{error, Reason} ->
+			json_error(Req, {error, Reason})
 	end.
 
-send_player(SID, Msg) ->
-	% Impliment This!!!
-	Pid = player_registry:player_pid_from_sid(SID),
-	player:msg_from_web_client(Pid, Msg).
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%% Private API %%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-get_param(Req, ValName) ->
-	proplists:get_value(ValName, Req:parse_qs()).
+join_table(Pid, _Req) ->
+	player:join_table(Pid).
 
-get_sid(Req) ->
-	get_param(Req, "sid").
+bet(Pid, Req) ->
+	Amt = wh:get_param(Req, "amt"),
+	io:format("Betting: ~p -> ~p~n", [Pid, Amt]),
+	player:bet(Pid, list_to_integer(Amt)).
+
+hit(Pid, _Req) ->
+	player:hit(Pid).
+
+stay(Pid, _Req) ->
+	player:stay(Pid).
+
+json_ok(Req, Msgs) when is_list(Msgs) -> json_respond(Req, <<"ok">>, Msgs);
+json_ok(Req, Msgs) -> json_respond(Req, <<"ok">>, [Msgs]).
+
+json_error(Req, Msgs) when is_list(Msgs) -> json_respond(Req, <<"error">>, Msgs);
+json_error(Req, Msgs) -> json_respond(Req, <<"error">>, [Msgs]).
+
+json_respond(Req, Status, Msgs) ->
+	io:format("json_respond =>> ~p~n", [Msgs]),
+	Req:ok({"text/json", [], json_msg(Status, Msgs)}).
+
+json_msg(Status, Msgs) ->
+	lists:flatten(rfc4627:encode({obj, [{"status", Status}|Msgs]})).
