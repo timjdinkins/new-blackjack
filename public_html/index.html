@@ -4,27 +4,124 @@
 <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
 <head>
 	<meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
-
-	<title>index</title>
-	
+	<title>Play BlackJack</title>
+	<link rel="stylesheet" href="/stylesheets/default.css" type="text/css" /
+	<script type="text/javascript" src="/javascripts/jquery-1.4.1.min.js"></script>
+	<script type="text/javascript" src="/javascripts/underscore-min.js"></script>
 </head>
 
 <body>
+	
+	<h1>Play BlackJack for Fun and Profit.</h1>
+	
+	<form action="/" method="post" id="registration">
+		<label for="name">Your name: </label>
+		<input type="text" name="name" value="tim" id="name" />
+		<input type="submit" name="submit" value="Register" />
+	</form>
+	
+	<br /><br />
+	
+	<form action="/" method="post" id="actions">
+		<label for="bet">Actions:</label>
+		<input type="button" name="bet-5" value="Bet $5" />
+		<input type="button" name="bet-10" value="Bet $10" />
+		<input type="button" name="bet-20" value="Bet $20" />
+		&nbsp;&nbsp;|&nbsp;&nbsp;
+		<input type="button" name="hit" value="Hit" />
+		&nbsp;|&nbsp;
+		<input type="button" name="stay" value="Stay" />
+	</form>
+	
+	<div id="messages"></div>
 
 	<div id="table">
 		<!-- put cards here -->
 	</div>
 	
 	<script type="text/javascript" charset="utf-8">
-		function pollServer(request) {
-			// asdf
+		var Game = {name: null, resps: []};
+		$(function() {
+			$('#registration').submit(function() {
+				register(this.name.value);
+				return false;
+			});
+			
+			$('#actions input').each(function() {
+				$(this).click(function() {
+					var ps = $(this).attr('name').split('-');
+					
+					if (ps[0] === 'stay') {
+						stay();
+					}
+					else if (ps[0] === 'hit') {
+						hit();
+					}
+					else {
+						bet(ps[1]);
+					}
+				});
+			})
+		});
+		
+		function bet(amt) {
+			$.post('/action', {name: Game.name, a: 'bet', amt: amt}, function(data) {}, 'json');
 		}
 		
-		$(function() {
-			// It seems I can use the code below to stop any calls already made.
-    	$(document).ajaxStop(pollServer);
-      pollServer();
-    });
+		function hit() {
+			$.post('/action', {name: Game.name, a: 'hit'}, function(data) {}, 'json');
+		}
+		
+		function stay() {
+			$.post('/action', {name: Game.name, a: 'stay'}, function(data) {}, 'json');
+		}
+
+		function register(name) {
+			Game.name = name;
+			$.post('/register', {name: name}, function(data) {
+					console.log(data.msgs[0].val);
+					pollServer(name);
+					$.post('/action', {name: name, a: 'join_table'}, function(data) {
+						if (data && data.msgs) { handleResp(data) }
+					}, 'json');
+				}, 'json');
+		}
+		
+		function appendMsg(msg) {
+			$('#messages').append('<p>' + msg + '</p>');
+		}
+
+		function pollServer(name) {
+			$.post('/listen', {name: name}, function(data) {
+				if (data) { handleResp(data) };
+				pollServer(name);
+			}, 'json');
+		}
+
+		function handleResp(data) {
+			Game.resps.push(data);
+			if (data.msgs.length) {
+				_.each(data.msgs, function(m) {
+					if (m.type == "msg") {
+						appendMsg(m.val);
+					}
+					else if (m.type === "error") {
+						appendMsg("Error: " + m.val);
+					}
+					else if (m.type === "table_update") {
+						if (m.cards) {
+							appendMsg("Seat: " + m.seat);
+							_.each(m.cards, function(o) {
+								appendMsg("Card: " + o.val + " of " + o.suit);
+							});
+						}
+						else if (m.bet) {
+							appendMsg("Seat: " + m.seat + " bet " + m.bet);
+						}
+					}
+				});
+			}
+		}
 	</script>
 
 </body>

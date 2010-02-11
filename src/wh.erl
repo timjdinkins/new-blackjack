@@ -8,9 +8,10 @@
 
 -export([get_param/2, clean_path/1, ltb/1, atl/1, atb/1]).
 -export([json_cards/1, enc/2, enc/3]).
+-export([enc_msg/1, enc_msg/2, enc_error/2, enc_new_cards/3, enc_bust/2, enc_result/4, enc_update/1]).
 
 get_param(Req, ValName) ->
-	proplists:get_value(ValName, Req:parse_qs()).
+	proplists:get_value(ValName, Req:parse_post()).
 	
 clean_path(Path) ->
 	case string:str(Path, "?") of
@@ -36,16 +37,38 @@ enc_card(V) ->
 	atb(V).
 
 json_cards(Cards) ->
-	[{obj, [{Suit, enc_card(Card)}]} || {Suit, Card, _Val} <- Cards].
+	[{obj, [{suit, Suit}, {val, enc_card(Card)}]} || {Suit, Card, _Val} <- Cards].
+
+json_obj(List) ->
+	{obj, [List]}.
 
 enc(K, V, Ms) ->
-	L = integer_to_list(length(Ms)),
 	SVal =  case V of
 						V when is_list(V) -> web_helper:ltb(V);
 					 	_Else -> V
 				 	end,
-	[{"update" ++ L, {obj, [{K, SVal}]}} | Ms].
+	[json_obj([{K, SVal}]) | Ms].
 
 enc(List, Ms) ->
-	L = integer_to_list(length(Ms)),
-	[{"update" ++ L, {obj, List}}].
+	[json_obj(List)|Ms].
+
+enc_msg(Str) ->
+	[{obj, [{type, <<"msg">>}, {val, ltb(Str)}]}].
+
+enc_msg(Str, Ms) ->
+	[{obj, [{type, <<"msg">>}, {val, ltb(Str)}]} | Ms].
+
+enc_error(Str, Ms) ->
+	[{obj, [{type, <<"error">>}, {val, ltb(Str)}]} | Ms].
+
+enc_new_cards(Cs, Sc, Ms) ->
+	[{obj, [{type, <<"state">>}, {cards, json_cards(Cs)}, {score, ltb(Sc)}]} | Ms].
+
+enc_bust(Score, Ms) ->
+	[{obj, [{type, <<"bust">>}, {score, Score}]} | Ms].
+
+enc_result(R, Amt, Stack, Ms) ->
+	[{obj, [{result, atb(R)}, {amt, Amt}, {stack, Stack}]} | Ms].
+
+enc_update(L) ->
+	[{obj, [{type, <<"table_update">>} | L]}].

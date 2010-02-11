@@ -1,6 +1,7 @@
 -module(web_server).
 
 -export([start/0, start/1, stop/0, dispatch_request/2]).
+-export([test/0]).
 
 start() ->
 	start(9000).
@@ -33,18 +34,16 @@ listen(Req, Pid) ->
 	receive
 		timeout -> json_ok(Req, {action, "reconnect"});
 		{'$gen_cast', Msgs} ->
-			io:format("Message from Player in listen loop: ~p~n", [Msgs]),
 			json_ok(Req, Msgs);
 		Any ->
-			io:format("Unknown message in listen loop: ~p~n", [Any]),
 			json_ok(Req, {unknown, Any})
 	end.
 
 handle_action("register", Req) ->
 	Name = wh:get_param(Req, "name"),
 	case registry:register(Name) of
-		{ok, _Pid} -> json_ok(Req, {ok, "registered"});
-		{error, Reason} -> json_ok(Req, {error, Reason})
+		{ok, _Pid} -> json_ok(Req, wh:enc_msg("registered", []));
+		{error, Reason} -> json_ok(Req, wh:enc_error(Reason, []))
 	end;
 
 handle_action("listen", Req) ->
@@ -59,7 +58,7 @@ handle_action("listen", Req) ->
 
 handle_action("action", Req) ->
 	Name = wh:get_param(Req, "name"),
-	Action = wh:get_param(Req, "action"),
+	Action = wh:get_param(Req, "a"),
 	io:format("Action request for: ~p -> ~p~n", [Name, Action]),
 	case registry:get_pid(Name) of
 		{ok, Pid} ->
@@ -69,9 +68,9 @@ handle_action("action", Req) ->
 				"hit" -> hit(Pid, Req);
 				"stay" -> stay(Pid, Req)
 			end,
-			json_ok(Req, {ok, "ok"});
+			json_ok(Req, wh:enc_msg("ok"));
 		{error, Reason} ->
-			json_error(Req, {error, Reason})
+			json_error(Req, wh:enc_error(Reason))
 	end.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -83,7 +82,7 @@ join_table(Pid, _Req) ->
 
 bet(Pid, Req) ->
 	Amt = wh:get_param(Req, "amt"),
-	io:format("Betting: ~p -> ~p~n", [Pid, Amt]),
+	io:format("Bet of: ~p~n", [Amt]),
 	player:bet(Pid, list_to_integer(Amt)).
 
 hit(Pid, _Req) ->
@@ -92,15 +91,20 @@ hit(Pid, _Req) ->
 stay(Pid, _Req) ->
 	player:stay(Pid).
 
-json_ok(Req, Msgs) when is_list(Msgs) -> json_respond(Req, <<"ok">>, Msgs);
-json_ok(Req, Msgs) -> json_respond(Req, <<"ok">>, [Msgs]).
+json_ok(Req, Msgs) -> json_respond(Req, <<"ok">>, Msgs).
 
-json_error(Req, Msgs) when is_list(Msgs) -> json_respond(Req, <<"error">>, Msgs);
-json_error(Req, Msgs) -> json_respond(Req, <<"error">>, [Msgs]).
+json_error(Req, Msgs) -> json_respond(Req, <<"error">>, Msgs).
 
-json_respond(Req, Status, Msgs) ->
-	io:format("json_respond =>> ~p~n", [Msgs]),
-	Req:ok({"text/json", [], json_msg(Status, Msgs)}).
+json_respond(Req, Status, Msgs) -> Req:ok({"text/json", [], json_msg(Status, Msgs)}).
 
 json_msg(Status, Msgs) ->
-	lists:flatten(rfc4627:encode({obj, [{"status", Status}|Msgs]})).
+	Ret = lists:flatten(rfc4627:encode({obj, [{status, Status}, {msgs, Msgs}]})),
+	io:format("JSON-Msg: ~p~n", [Ret]),
+	Ret.
+
+test() ->
+	Ms = wh:enc_msg("Start the DAMN GAME!", []),
+	NMs = wh:enc_msg("Run for it!", Ms),
+	NNMs = wh:enc_bust(29, NMs),
+	V = json_msg(<<"ok">>, NNMs),
+	io:format("Out -> ~p~n", [V]).

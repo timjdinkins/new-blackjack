@@ -52,24 +52,24 @@ stay(Pid, PlayerPid) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 waiting({start_hand, TablePid, Seats}, #state{timer=Timer}=State) ->
-	ok = notify_players(Seats, {msg, "Starting a new game"}),
+	ok = notify_players(Seats, wh:enc_msg("Starting a new game")),
 	send_self(1, start_betting, Timer),
 	{next_state, betting, State#state{tablepid=TablePid, seats=Seats, deck=deck:shuffled()}}.
 
 betting(start_betting, #state{timer=Timer, seats=Seats}=State) ->
-	ok = notify_players(Seats, {msg, "Place your bets"}),
+	ok = notify_players(Seats, wh:enc_msg("Place your bets")),
 	send_self(30, end_betting, Timer),
 	{next_state, betting, State};
 
 betting(end_betting, #state{timer=Timer, seats=Seats}=State) ->
-	ok = notify_players(Seats, {msg, "Betting is closed."}),
+	ok = notify_players(Seats, wh:enc_msg("Betting is closed.")),
 	case anyone_playing(Seats) of
 		yes ->
-			ok = notify_players(Seats, {msg, "Dealing hands."}),
+			ok = notify_players(Seats, wh:enc_msg("Dealing hands.")),
 			send_self(2, start_dealing, Timer),
 			{next_state, dealing, State};
 		no  ->
-			ok = notify_players(Seats, {msg, "No one wants to play.  Damn you!"}),
+			ok = notify_players(Seats, wh:enc_msg("No one wants to play.  Damn you!")),
 			send_self(2, payout_hands, Timer),
 			{next_state, finish_game, State}
 	end;
@@ -80,7 +80,7 @@ betting({place_bet, Pid, Amt}, #state{timer=Timer, seats=Seats}=State) ->
 	case all_bets_in(NewSeats) of
 		yes   -> send_self(0, end_betting, Timer)
 	end,
-	notify_players(Seats, [{action, <<"update_table">>}, {seat, SeatN}, {bet, Bet + Amt}]),
+	notify_players(Seats, wh:enc_update([{seat, SeatN}, {bet, Bet + Amt}])),
 	{next_state, betting, State#state{seats=NewSeats}};
 
 betting(Any, State) ->
@@ -103,7 +103,7 @@ playing_hands(play_hand, #state{timer=Timer, hand=Hand}=State) when Hand > 6 ->
 
 playing_hands(play_hand, #state{timer=Timer, seats=Seats, hand=Hand}=State) ->
 	{_SeatN, Pid, _Seat} = lists:keyfind(Hand, 1, Seats),
-	notify(Pid, {msg, "Hit or stay?"}),
+	notify(Pid, wh:enc_msg("Hit or stay?")),
 	send_self(30, next_hand, Timer),
 	{next_state, playing_hands, State};
 
@@ -219,11 +219,10 @@ initial_deal(Seats, Deck) ->
 initial_deal(Consumed, [], Deck) ->
 	{ok, Cards, NewDeck} = deck:draw(2, Deck), % The dealers hand
 	Seats = lists:reverse(Consumed),
-	Notify = fun({S, _P, Seat}) ->
-		M = [{action, <<"update_table">>}, {seat, S}, {cards, wh:json_cards(Seat#seat.cards)}],
-		notify_players(Seats, M)
+	Pred = fun({S, _P, Seat}) ->
+		wh:enc_update([{seat, S}, {cards, wh:json_cards(Seat#seat.cards)}])
 	end,
-	lists:foreach(Notify, Seats),
+	notify_players(Seats, lists:map(Pred, Seats)),
 	{ok, Seats, #seat{cards=Cards}, NewDeck};
 
 initial_deal(Consumed, [{SeatN, Pid, #seat{bet=Bet}=Seat}=S|Seats], Deck) ->
