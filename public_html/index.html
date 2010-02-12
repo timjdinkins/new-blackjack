@@ -22,6 +22,13 @@
 	
 	<br /><br />
 	
+	<div id="table" style="height: 100px;">
+		<div id="player-cards" style="float: left; width: 400px"></div>
+		<div id="dealer-cards" style="float: left; width: 300px; display: none;"></div>
+	</div>
+	
+	<br /><br />
+	
 	<form action="/" method="post" id="actions">
 		<label for="bet">Actions:</label>
 		<input type="button" name="bet-5" value="Bet $5" />
@@ -33,15 +40,16 @@
 		<input type="button" name="stay" value="Stay" />
 	</form>
 	
+	<h2>Stack: <span id="stack">200</span></h2>
+	
 	<div id="messages"></div>
-
-	<div id="table">
-		<!-- put cards here -->
-	</div>
 	
 	<script type="text/javascript" charset="utf-8">
 		var Game = {name: null, resps: []};
 		$(function() {
+			
+			resetCards();
+			
 			$('#registration').submit(function() {
 				register(this.name.value);
 				return false;
@@ -86,10 +94,6 @@
 					}, 'json');
 				}, 'json');
 		}
-		
-		function appendMsg(msg) {
-			$('#messages').append('<p>' + msg + '</p>');
-		}
 
 		function pollServer(name) {
 			$.post('/listen', {name: name}, function(data) {
@@ -103,24 +107,91 @@
 			if (data.msgs.length) {
 				_.each(data.msgs, function(m) {
 					if (m.type == "msg") {
-						appendMsg(m.val);
+						if (m.val == "Starting a new game") {
+							resetCards();
+						}
+						else if (m.val != 'ok') {
+							appendMsg(m.val);
+						}
 					}
 					else if (m.type === "error") {
 						appendMsg("Error: " + m.val);
 					}
 					else if (m.type === "table_update") {
 						if (m.cards) {
-							appendMsg("Seat: " + m.seat);
-							_.each(m.cards, function(o) {
-								appendMsg("Card: " + o.val + " of " + o.suit);
-							});
+							if (m.seat === "dealer") {
+								updateCards(m.cards, $('#dealer-cards'));
+							}
+							else {
+								$('#dealer-cards').show();
+								updateCards(m.cards, $('#player-cards'));
+							}
 						}
 						else if (m.bet) {
 							appendMsg("Seat: " + m.seat + " bet " + m.bet);
 						}
 					}
+					else if (m.type === "bust") {
+						appendMsg("Busted with a score of: " + m.score);
+					}
+					else if (m.type === "result") {
+						if (m.result === "won" || m.result === "lost") {
+							appendMsg("You " + m.result + " " + m.amt);
+						}
+						else if (m.result === "tie") {
+							appendMsg("It's a tie");
+						}
+						if (m.stack) {
+							$('#stack').html('$' + m.stack);
+						}
+					}
 				});
 			}
+		}
+		
+		var Q = [];
+		
+		function appendMsg(msg) {
+			Q.push(msg);
+			if (Q.length > 3) {
+				Q.shift();
+			}
+			var ms = $('#messages');
+			ms.empty();
+			_.each(Q, function(m) {
+				$('#messages').append('<p>' + m + '</p>');
+			});
+		}
+		
+		function updateCards(cards, table) {
+			table.empty();
+			
+			_.each(cards, function(c) {
+				if (_.isNumber(c.val)) {
+					if (c.val == 10) {
+						v = 't';
+					}
+					else {
+						v = c.val;
+					}
+				}
+				else {
+					v = c.val[0].toLowerCase();
+				}
+				s = c.suit[0].toLowerCase();
+				// var card = $('img').val('src', v + s + ".gif");
+				var card = $('<img src=\'/images/' + v + s + '.gif\' />');
+				$(card).appendTo(table);
+			});
+		}
+		
+		function cardBack() {
+			return "<img src=\"/images/b.gif\" alt=\"Card Back\" />";
+		}
+		
+		function resetCards() {
+			$('#player-cards').empty();
+			$('#dealer-cards').empty().append(cardBack()).append(cardBack()).hide();
 		}
 	</script>
 

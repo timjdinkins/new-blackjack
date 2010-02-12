@@ -36,7 +36,8 @@ listen(Req, Pid) ->
 		{'$gen_cast', Msgs} ->
 			json_ok(Req, Msgs);
 		Any ->
-			json_ok(Req, {unknown, Any})
+			io:format("Unknown message: ~p~n", [Any]),
+			json_ok(Req, wh:enc_msg(Any))
 	end.
 
 handle_action("register", Req) ->

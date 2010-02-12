@@ -8,7 +8,8 @@
 
 -export([get_param/2, clean_path/1, ltb/1, atl/1, atb/1]).
 -export([json_cards/1, enc/2, enc/3]).
--export([enc_msg/1, enc_msg/2, enc_error/2, enc_new_cards/3, enc_bust/2, enc_result/4, enc_update/1]).
+-export([enc_msg/1, enc_msg/2, enc_error/1, enc_error/2, enc_new_cards/3]).
+-export([enc_bust/2, enc_result/1, enc_result/4, enc_update/1]).
 
 get_param(Req, ValName) ->
 	proplists:get_value(ValName, Req:parse_post()).
@@ -58,17 +59,23 @@ enc_msg(Str) ->
 enc_msg(Str, Ms) ->
 	[{obj, [{type, <<"msg">>}, {val, ltb(Str)}]} | Ms].
 
+enc_error(Str) ->
+	[{obj, [{type, <<"error">>}, {val, ltb(Str)}]}].
+
 enc_error(Str, Ms) ->
 	[{obj, [{type, <<"error">>}, {val, ltb(Str)}]} | Ms].
 
 enc_new_cards(Cs, Sc, Ms) ->
-	[{obj, [{type, <<"state">>}, {cards, json_cards(Cs)}, {score, ltb(Sc)}]} | Ms].
+	[{obj, [{type, <<"state_update">>}, {cards, json_cards(Cs)}, {score, Sc}]} | Ms].
 
 enc_bust(Score, Ms) ->
 	[{obj, [{type, <<"bust">>}, {score, Score}]} | Ms].
 
+enc_result(L) ->
+	[{obj, [{type, <<"result">>} | L]}].
+
 enc_result(R, Amt, Stack, Ms) ->
-	[{obj, [{result, atb(R)}, {amt, Amt}, {stack, Stack}]} | Ms].
+	[{obj, [{type, <<"result">>}, {result, atb(R)}, {amt, Amt}, {stack, Stack}]} | Ms].
 
 enc_update(L) ->
 	[{obj, [{type, <<"table_update">>} | L]}].
