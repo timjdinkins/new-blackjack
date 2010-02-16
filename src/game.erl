@@ -1,7 +1,8 @@
 -module(game).
 -behavior(gen_fsm).
 
--record(seat, {name, cards, bet=0}).
+-include_lib("game.hrl").
+
 -record(state, {tablepid, timer, seats, deck, hand, dealer=#seat{}}).
 
 -export([start_link/0, init/1, stop/1, terminate/3]).
@@ -15,7 +16,7 @@
 start_link() ->
 	gen_fsm:start_link(?MODULE, [], []).
 
-stop(Pid) ->
+stop(Pid) ->		
 	gen_fsm:send_all_state_event(Pid, stop).
 
 init([]) ->
@@ -52,6 +53,7 @@ stay(Pid, PlayerPid) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 waiting({start_hand, TablePid, Seats}, #state{timer=Timer}=State) ->
+	ok = notify_players(Seats, [{type, <<"table_state">>}|wh:enc_seats(Seats)]),
 	ok = notify_players(Seats, wh:enc_msg("Starting a new game")),
 	send_self(1, start_betting, Timer),
 	{next_state, betting, State#state{tablepid=TablePid, seats=Seats, deck=deck:shuffled()}}.
@@ -102,8 +104,7 @@ playing_hands(play_hand, #state{timer=Timer, hand=Hand}=State) when Hand > 6 ->
 	{next_state, dealer, State};
 
 playing_hands(play_hand, #state{timer=Timer, seats=Seats, hand=Hand}=State) ->
-	{_SeatN, Pid, _Seat} = lists:keyfind(Hand, 1, Seats),
-	notify(Pid, wh:enc_msg("Hit or stay?")),
+	notify_players(Seats, wh:enc_dealer_msg(Hand, "Hit or stay?")),
 	send_self(30, next_hand, Timer),
 	{next_state, playing_hands, State};
 

@@ -6,6 +6,8 @@
 %%
 -module(wh).
 
+-include_lib("game.hrl").
+
 -export([get_param/2, clean_path/1, ltb/1, atl/1, atb/1]).
 -export([generate_sid/2, bin_to_hexstr/1]).
 -export([json_cards/1, enc/2, enc/3]).
@@ -68,6 +70,11 @@ enc_msg(Str) ->
 enc_msg(Str, Ms) ->
 	[{obj, [{type, <<"msg">>}, {val, ltb(Str)}]} | Ms].
 
+% These messages are broadcast to all players at the table so they can all see what
+% the dealer is saying to a player.
+enc_dealer_msg(Seat, Str) ->
+	[{obj, [{type, <<"dealer-msg">>}, {val, ltb(Str)}]}].
+
 enc_error(Str) ->
 	[{obj, [{type, <<"error">>}, {val, ltb(Str)}]}].
 
@@ -88,3 +95,9 @@ enc_result(R, Amt, Stack, Ms) ->
 
 enc_update(L) ->
 	[{obj, [{type, <<"table_update">>} | L]}].
+
+enc_seats(Seats) ->
+	SeatState = fun({Sn, _P, #seat{name=Nm, stack=St}}) ->
+								{obj, [{seat, Sn}, {name, Nm}, {stack, St}]}
+							end,
+	lists:map(SeatState, Seats).
