@@ -53,7 +53,7 @@ stay(Pid, PlayerPid) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 waiting({start_hand, TablePid, Seats}, #state{timer=Timer}=State) ->
-	ok = notify_players(Seats, [{type, <<"table_state">>}|wh:enc_seats(Seats)]),
+	ok = notify_players(Seats, wh:enc_initial_state(Seats)),
 	ok = notify_players(Seats, wh:enc_msg("Starting a new game")),
 	send_self(1, start_betting, Timer),
 	{next_state, betting, State#state{tablepid=TablePid, seats=Seats, deck=deck:shuffled()}}.

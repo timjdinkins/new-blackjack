@@ -1,3 +1,65 @@
 body {
 	font: normal 14px sans-serif;
 }
+
+div#table {
+	position: relative;
+	height: 400px;
+	width: 800px;
+}
+div#table div.seat {
+	position: absolute;
+}
+div#table div.seat h3 {
+	text-align: center;
+}
+div#table #dealer {
+	position: absolute;
+	top: 10px;
+	left: 340px;
+}
+div#table #seat1 {
+	top: 140px;
+	left: 10px;
+}
+div#table #seat2 {
+	top: 150px;
+	left: 140px;
+}
+div#table #seat3 {
+	top: 160px;
+	left: 270px;
+}
+div#table #seat4 {
+	top: 160px;
+	left: 400px;
+}
+div#table #seat5 {
+	top: 150px;
+	left: 530px;
+}
+div#table #seat6 {
+	top: 140px;
+	left: 660px;
+}
+
+div#table div.seat div.cards {
+	float: left;
+	height: 50px;
+	border: 1px solid red;
+}
+div#table div.seat div.cards div.card:first-child {
+	margin-right: 3px;
+}
+div#table div.seat div.cards div.card {
+	width: 36px;
+	height: 48px;
+	float: left;
+	background-color: grey;
+}
+div#table div.seat div.money {
+	clear: left;
+	width: 100px;
+	height: 20px;
+	border: 1px solid red;
+}

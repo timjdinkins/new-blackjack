@@ -22,9 +22,86 @@
 	
 	<br /><br />
 	
-	<div id="table" style="height: 100px;">
-		<div id="player-cards" style="float: left; width: 400px"></div>
-		<div id="dealer-cards" style="float: left; width: 300px; display: none;"></div>
+	<div id="table">
+		<div id="dealer" class="seat">
+			<h3>Dealer</h3>
+			<div class="cards">
+				<div class="card"></div>
+				<div class="card"></div>
+			</div>
+		</div>
+		
+		<div id="seat1" class="seat">
+			<h3>1</h3>
+			<div class="cards">
+				<div class="card"></div>
+				<div class="card"></div>
+			</div>
+			<div class="money">
+				<p class="bet"></p>
+				<p class="stack"></p>
+			</div>
+		</div>
+		
+		<div id="seat2" class="seat">
+			<h3>2</h3>
+			<div class="cards">
+				<div class="card"></div>
+				<div class="card"></div>
+			</div>
+			<div class="money">
+				<p class="bet"></p>
+				<p class="stack"></p>
+			</div>
+		</div>
+		
+		<div id="seat3" class="seat">
+			<h3>3</h3>
+			<div class="cards">
+				<div class="card"></div>
+				<div class="card"></div>
+			</div>
+			<div class="money">
+				<p class="bet"></p>
+				<p class="stack"></p>
+			</div>
+		</div>
+			
+		<div id="seat4" class="seat">
+			<h3>4</h3>
+			<div class="cards">
+				<div class="card"></div>
+				<div class="card"></div>
+			</div>
+			<div class="money">
+				<p class="bet"></p>
+				<p class="stack"></p>
+			</div>
+		</div>
+		
+		<div id="seat5" class="seat">
+			<h3>5</h3>
+			<div class="cards">
+				<div class="card"></div>
+				<div class="card"></div>
+			</div>
+			<div class="money">
+				<p class="bet"></p>
+				<p class="stack"></p>
+			</div>
+		</div>
+		
+		<div id="seat6" class="seat">
+			<h3>6</h3>
+			<div class="cards">
+				<div class="card"></div>
+				<div class="card"></div>
+			</div>
+			<div class="money">
+				<p class="bet"></p>
+				<p class="stack"></p>
+			</div>
+		</div>
 	</div>
 	
 	<br /><br />
@@ -45,10 +122,10 @@
 	<div id="messages"></div>
 	
 	<script type="text/javascript" charset="utf-8">
-		var Game = {name: null, resps: []};
+		var Game = {name: null, mySeat: null, resps: []};
 		$(function() {
 			
-			resetCards();
+			// resetCards();
 			
 			$('#registration').submit(function() {
 				register(this.name.value);
@@ -74,6 +151,7 @@
 		
 		function bet(amt) {
 			$.post('/action', {a: 'bet', amt: amt}, function(data) {}, 'json');
+			mySeat().find('.bet').html("$" + amt);
 		}
 		
 		function hit() {
@@ -106,7 +184,10 @@
 			Game.resps.push(data);
 			if (data.msgs.length) {
 				_.each(data.msgs, function(m) {
-					if (m.type == "msg") {
+					if (m.type === "registered") {
+						Game.mySeat = m.seat;
+					}
+					else if (m.type === "msg") {
 						if (m.val == "Starting a new game") {
 							resetCards();
 						}
@@ -117,14 +198,21 @@
 					else if (m.type === "error") {
 						appendMsg("Error: " + m.val);
 					}
+					else if (m.type === "initial_state") {
+						initializeGame(m.seats);
+					}
 					else if (m.type === "table_update") {
-						if (m.cards) {
+						if (m.seat) {
 							if (m.seat === "dealer") {
 								updateCards(m.cards, $('#dealer-cards'));
 							}
 							else {
-								$('#dealer-cards').show();
-								updateCards(m.cards, $('#player-cards'));
+								if (m.bet) {
+									seat(m.seat).find('.bet').html(m.bet);
+								}
+								else if (m.cards) {
+									updateCards(m.seat, m.cards);
+								}
 							}
 						}
 						else if (m.bet) {
@@ -163,35 +251,52 @@
 			});
 		}
 		
-		function updateCards(cards, table) {
-			table.empty();
-			
-			_.each(cards, function(c) {
-				if (_.isNumber(c.val)) {
-					if (c.val == 10) {
-						v = 't';
-					}
-					else {
-						v = c.val;
-					}
-				}
-				else {
-					v = c.val[0].toLowerCase();
-				}
-				s = c.suit[0].toLowerCase();
-				// var card = $('img').val('src', v + s + ".gif");
-				var card = $('<img src=\'/images/' + v + s + '.gif\' />');
-				$(card).appendTo(table);
+		function initializeGame(ss) {
+			_.each(ss, function(s) {
+				var seat = $('#seat' + s.seat);
+				seat.find('h3').html(s.name);
 			});
 		}
 		
-		function cardBack() {
-			return "<img src=\"/images/b.gif\" alt=\"Card Back\" />";
+		function mySeat() {
+			return seat(Game.mySeat);
+		}
+		
+		function seat(i) {
+			return $('#seat' + i);
+		}
+		
+		function updateCards(i, cards) {
+			var s = seat(i);
+			var cardDivs = s.find('.card');
+			console.log(cards[0].val);
+			console.log(cards[1].val);
+			$(cardDivs[0]).html(cardImg(cards[0]));
+			$(cardDivs[1]).html(cardImg(cards[1]));
+		}
+		
+		function cardImg(c) {
+			if (_.isNumber(c.val)) {
+				if (c.val == 10) {
+					v = 't';
+				}
+				else {
+					v = c.val;
+				}
+			}
+			else {
+				v = c.val[0].toLowerCase();
+			}
+			s = c.suit[0].toLowerCase();
+			return $('<img src=\'/images/' + v + s + '.gif\' width=\'36px\' height=\'48px\' />');
+		}
+		
+		function cardBackImg() {
+			return $("<img src=\"/images/b.gif\" alt=\"Card Back\" width=\"36px\" height=\"48px\" />");
 		}
 		
 		function resetCards() {
-			$('#player-cards').empty();
-			$('#dealer-cards').empty().append(cardBack()).append(cardBack()).hide();
+			$('div#table div.seat div.cards div.card').empty();
 		}
 	</script>
 

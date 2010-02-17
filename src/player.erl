@@ -6,7 +6,7 @@
 -record(state, {proxy_pid, name, stack=0, table=#table{}, game=#game{}, messages=[]}).
 
 -export([start_link/2, init/1, stop/1, terminate/2]).
--export([handle_cast/2]).
+-export([handle_cast/2, handle_call/3]).
 
 -export([join_table/1, register_proxy/2, bet/2, stay/1, hit/1, notify/2]).
 -export([won/2, lost/2, tied/1, new_cards/3, busted/3]).
@@ -31,7 +31,7 @@ terminate(_Reason, _Game) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 join_table(Pid) ->
-	gen_server:cast(Pid, join_table).
+	gen_server:call(Pid, join_table).
 
 register_proxy(Pid, ProxyPid) ->
 	gen_server:cast(Pid, {register_proxy, ProxyPid}).
@@ -69,14 +69,14 @@ notify(Pid, Msg) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
-handle_cast(join_table, #state{proxy_pid=Pid, name=Name, messages=Messages}=State) ->
+handle_call(join_table, _From, #state{proxy_pid=Pid, name=Name, messages=Messages}=State) ->
 	case casino:join_table(self(), Name) of
 		{ok, Table, Game, Seat} ->
-			{noreply, State#state{table=#table{pid=Table, seat=Seat}, game=#game{pid=Game}}};
+			{reply, {ok, Seat}, State#state{table=#table{pid=Table, seat=Seat}, game=#game{pid=Game}}};
 		{error, _Msg}  ->
 			{NPid, Ms} = notify_proxy(Pid, wh:enc_msg("Joining the table failed.  Try again later.", Messages)),
-			{noreply, State#state{proxy_pid=NPid, messages=Ms}}
-	end;
+			{reply, {error, join_failed}, State#state{proxy_pid=NPid, messages=Ms}}
+	end.
 
 handle_cast({bet, Amt}, #state{proxy_pid=Pid, game=Game, stack=Stack, messages=Messages}=State) ->
 	case Amt + Game#game.bet of

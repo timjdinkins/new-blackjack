@@ -13,6 +13,7 @@
 -export([json_cards/1, enc/2, enc/3]).
 -export([enc_msg/1, enc_msg/2, enc_error/1, enc_error/2, enc_new_cards/3]).
 -export([enc_bust/2, enc_result/1, enc_result/4, enc_update/1]).
+-export([enc_dealer_msg/2, enc_initial_state/1, enc_registered/1]).
 
 get_param(Req, ValName) ->
 	proplists:get_value(ValName, Req:parse_post()).
@@ -73,13 +74,16 @@ enc_msg(Str, Ms) ->
 % These messages are broadcast to all players at the table so they can all see what
 % the dealer is saying to a player.
 enc_dealer_msg(Seat, Str) ->
-	[{obj, [{type, <<"dealer-msg">>}, {val, ltb(Str)}]}].
+	[{obj, [{type, <<"dealer-msg">>}, {seat, Seat}, {val, ltb(Str)}]}].
 
 enc_error(Str) ->
 	[{obj, [{type, <<"error">>}, {val, ltb(Str)}]}].
 
 enc_error(Str, Ms) ->
 	[{obj, [{type, <<"error">>}, {val, ltb(Str)}]} | Ms].
+
+enc_registered(Seat) ->
+	[{obj, [{type, <<"registered">>}, {seat, Seat}]}].
 
 enc_new_cards(Cs, Sc, Ms) ->
 	[{obj, [{type, <<"state_update">>}, {cards, json_cards(Cs)}, {score, Sc}]} | Ms].
@@ -96,8 +100,6 @@ enc_result(R, Amt, Stack, Ms) ->
 enc_update(L) ->
 	[{obj, [{type, <<"table_update">>} | L]}].
 
-enc_seats(Seats) ->
-	SeatState = fun({Sn, _P, #seat{name=Nm, stack=St}}) ->
-								{obj, [{seat, Sn}, {name, Nm}, {stack, St}]}
-							end,
-	lists:map(SeatState, Seats).
+enc_initial_state(Seats) ->
+	Ss = [{obj, [{seat, Sn}, {name, wh:ltb(Nm)}, {stack, Stk}]} || {Sn, _P, #seat{name=Nm, stack=Stk}} <- Seats],
+	[{obj, [{type, <<"initial_state">>}, {seats, Ss}]}].

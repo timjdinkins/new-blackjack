@@ -72,12 +72,19 @@ handle_action("action", Req) ->
 	case registry:get_pid(SID) of
 		{ok, Pid} ->
 			case Action of
-				"join_table" -> join_table(Pid, Req);
-				"bet" -> bet(Pid, Req);
-				"hit" -> hit(Pid, Req);
-				"stay" -> stay(Pid, Req)
-			end,
-			json_ok(Req, wh:enc_msg("ok"));
+				"join_table" ->
+					{ok, Seat} = join_table(Pid, Req),
+					json_ok(Req, wh:enc_registered(Seat));
+				"bet" ->
+					bet(Pid, Req),
+					json_ok(Req, wh:enc_msg("ok"));
+				"hit" ->
+					hit(Pid, Req),
+					json_ok(Req, wh:enc_msg("ok"));
+				"stay" ->
+					stay(Pid, Req),
+					json_ok(Req, wh:enc_msg("ok"))
+			end;
 		{error, Reason} ->
 			json_error(Req, wh:enc_error(Reason))
 	end.
