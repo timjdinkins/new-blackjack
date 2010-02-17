@@ -73,15 +73,15 @@
 		});
 		
 		function bet(amt) {
-			$.post('/action', {name: Game.name, a: 'bet', amt: amt}, function(data) {}, 'json');
+			$.post('/action', {a: 'bet', amt: amt}, function(data) {}, 'json');
 		}
 		
 		function hit() {
-			$.post('/action', {name: Game.name, a: 'hit'}, function(data) {}, 'json');
+			$.post('/action', {a: 'hit'}, function(data) {}, 'json');
 		}
 		
 		function stay() {
-			$.post('/action', {name: Game.name, a: 'stay'}, function(data) {}, 'json');
+			$.post('/action', {a: 'stay'}, function(data) {}, 'json');
 		}
 
 		function register(name) {
@@ -89,14 +89,14 @@
 			$.post('/register', {name: name}, function(data) {
 					console.log(data.msgs[0].val);
 					pollServer(name);
-					$.post('/action', {name: name, a: 'join_table'}, function(data) {
+					$.post('/action', {a: 'join_table'}, function(data) {
 						if (data && data.msgs) { handleResp(data) }
 					}, 'json');
 				}, 'json');
 		}
 
 		function pollServer(name) {
-			$.post('/listen', {name: name}, function(data) {
+			$.post('/listen', function(data) {
 				if (data) { handleResp(data) };
 				pollServer(name);
 			}, 'json');

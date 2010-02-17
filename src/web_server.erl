@@ -41,15 +41,23 @@ listen(Req, Pid) ->
 	end.
 
 handle_action("register", Req) ->
+	IP = Req:get_header_value("host"),
 	Name = wh:get_param(Req, "name"),
-	case registry:register(Name) of
-		{ok, _Pid} -> json_ok(Req, wh:enc_msg("registered", []));
+	% This is busted.  The cookie code can't handle the hash as it
+	% wants it escaped.
+	SID = wh:generate_sid(Name, IP),
+	Cookie = mochiweb_cookies:cookie("sid", SID, [{path, "/"}]),
+	io:format("Cookie: ~p~n", [Cookie]),
+	
+	case registry:register_player(SID, Name) of
+		{ok, _Pid} ->
+			Req:ok({"text/json", [Cookie], json_msg(<<"ok">>, wh:enc_msg("registered"))});
 		{error, Reason} -> json_ok(Req, wh:enc_error(Reason, []))
 	end;
 
 handle_action("listen", Req) ->
-	Name = wh:get_param(Req, "name"),
-	case registry:get_pid(Name) of
+	SID = Req:get_cookie_value("sid"),
+	case registry:get_pid(SID) of
 		{ok, Pid} ->
 			timer:send_after(30000, self(), timeout),
 			listen(Req, Pid);
@@ -58,10 +66,10 @@ handle_action("listen", Req) ->
 	end;
 
 handle_action("action", Req) ->
-	Name = wh:get_param(Req, "name"),
+	SID = Req:get_cookie_value("sid"),
 	Action = wh:get_param(Req, "a"),
-	io:format("Action request for: ~p -> ~p~n", [Name, Action]),
-	case registry:get_pid(Name) of
+	io:format("Action request for: ~p -> ~p~n", [SID, Action]),
+	case registry:get_pid(SID) of
 		{ok, Pid} ->
 			case Action of
 				"join_table" -> join_table(Pid, Req);

@@ -5,7 +5,7 @@
 
 -export([start_link/0, stop/0, terminate/2]).
 -export([init/1, handle_call/3]).
--export([register/1, get_pid/1]).
+-export([register_player/2, get_pid/1]).
 
 start_link() ->
 	gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
@@ -24,28 +24,28 @@ terminate(_Reason, _State) ->
 %%%%%%% Public API %%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-register(Name) ->
-	gen_server:call(?SERVER, {register, Name}).
+register_player(SID, Name) ->
+	gen_server:call(?SERVER, {register, SID, Name}).
 
-get_pid(Name) ->
-	gen_server:call(?SERVER, {get_pid, Name}).
+get_pid(SID) ->
+	gen_server:call(?SERVER, {get_pid, SID}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%% Callbacks %%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-handle_call({register, Name}, _From, State) ->
-	case already_registered(Name, State) of
+handle_call({register, SID, Name}, _From, State) ->
+	case already_registered(SID, Name, State) of
 		yes ->
 			{reply, {error, "already_registered"}, State};
 		no ->
 			{ok, Pid} = player_sup:start_player(Name, 200),
-			{reply, {ok, Pid}, [{Name, Pid}|State]}
+			{reply, {ok, Pid}, [{SID, Name, Pid}|State]}
 	end;
 
-handle_call({get_pid, Name}, _From, State) ->
-	case lists:keyfind(Name, 1, State) of
-		{Name, Pid} ->
+handle_call({get_pid, SID}, _From, State) ->
+	case lists:keyfind(SID, 1, State) of
+		{SID, _Name, Pid} ->
 			{reply, {ok, Pid}, State};
 		false ->
 			{reply, {error, name_not_found}, State}
@@ -59,8 +59,8 @@ handle_call(Unknown, _From, State) ->
 %%%%%%% Private API %%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-already_registered(N, Ps) ->
-	case lists:keyfind(N, 1, Ps) of
-		{N, _Pid} -> yes;
+already_registered(SID, N, Ps) ->
+	case lists:keyfind(SID, 1, Ps) of
+		{SID, N, _Pid} -> yes;
 		false   -> no
 	end.

@@ -7,6 +7,7 @@
 -module(wh).
 
 -export([get_param/2, clean_path/1, ltb/1, atl/1, atb/1]).
+-export([generate_sid/2, bin_to_hexstr/1]).
 -export([json_cards/1, enc/2, enc/3]).
 -export([enc_msg/1, enc_msg/2, enc_error/1, enc_error/2, enc_new_cards/3]).
 -export([enc_bust/2, enc_result/1, enc_result/4, enc_update/1]).
@@ -21,6 +22,14 @@ clean_path(Path) ->
 		N ->
 			string:substr(Path, 1, string:len(Path) - (N + 1))
 	end.
+
+generate_sid(Name, IP) ->
+	Hash = crypto:sha_mac([Name, IP], "blackjack"),
+	bin_to_hexstr(Hash).
+
+bin_to_hexstr(Bin) ->
+  lists:flatten([io_lib:format("~2.16.0B", [X]) ||
+    X <- binary_to_list(Bin)]).
 
 ltb(Val) ->
 	list_to_binary(Val).
