@@ -28,12 +28,18 @@
 			<div class="cards">
 				<div class="card"></div>
 				<div class="card"></div>
+				<div class="card"></div>
+				<div class="card"></div>
+				<div class="card"></div>
 			</div>
 		</div>
 		
 		<div id="seat1" class="seat">
 			<h3>1</h3>
 			<div class="cards">
+				<div class="card"></div>
+				<div class="card"></div>
+				<div class="card"></div>
 				<div class="card"></div>
 				<div class="card"></div>
 			</div>
@@ -48,6 +54,9 @@
 			<div class="cards">
 				<div class="card"></div>
 				<div class="card"></div>
+				<div class="card"></div>
+				<div class="card"></div>
+				<div class="card"></div>
 			</div>
 			<div class="money">
 				<p class="bet"></p>
@@ -58,6 +67,9 @@
 		<div id="seat3" class="seat">
 			<h3>3</h3>
 			<div class="cards">
+				<div class="card"></div>
+				<div class="card"></div>
+				<div class="card"></div>
 				<div class="card"></div>
 				<div class="card"></div>
 			</div>
@@ -72,6 +84,9 @@
 			<div class="cards">
 				<div class="card"></div>
 				<div class="card"></div>
+				<div class="card"></div>
+				<div class="card"></div>
+				<div class="card"></div>
 			</div>
 			<div class="money">
 				<p class="bet"></p>
@@ -82,6 +97,9 @@
 		<div id="seat5" class="seat">
 			<h3>5</h3>
 			<div class="cards">
+				<div class="card"></div>
+				<div class="card"></div>
+				<div class="card"></div>
 				<div class="card"></div>
 				<div class="card"></div>
 			</div>
@@ -96,6 +114,9 @@
 			<div class="cards">
 				<div class="card"></div>
 				<div class="card"></div>
+				<div class="card"></div>
+				<div class="card"></div>
+				<div class="card"></div>
 			</div>
 			<div class="money">
 				<p class="bet"></p>
@@ -104,7 +125,9 @@
 		</div>
 	</div>
 	
-	<br /><br />
+	<div id="messages"></div>
+	
+	<br /><br /><br /><br />
 	
 	<form action="/" method="post" id="actions">
 		<label for="bet">Actions:</label>
@@ -117,15 +140,11 @@
 		<input type="button" name="stay" value="Stay" />
 	</form>
 	
-	<h2>Stack: <span id="stack">200</span></h2>
-	
-	<div id="messages"></div>
-	
 	<script type="text/javascript" charset="utf-8">
 		var Game = {name: null, mySeat: null, resps: []};
 		$(function() {
 			
-			// resetCards();
+			resetCards();
 			
 			$('#registration').submit(function() {
 				register(this.name.value);
@@ -204,7 +223,7 @@
 					else if (m.type === "table_update") {
 						if (m.seat) {
 							if (m.seat === "dealer") {
-								updateCards(m.cards, $('#dealer-cards'));
+								updateDealerCards(m.cards);
 							}
 							else {
 								if (m.bet) {
@@ -241,7 +260,7 @@
 		
 		function appendMsg(msg) {
 			Q.push(msg);
-			if (Q.length > 3) {
+			if (Q.length > 2) {
 				Q.shift();
 			}
 			var ms = $('#messages');
@@ -255,6 +274,7 @@
 			_.each(ss, function(s) {
 				var seat = $('#seat' + s.seat);
 				seat.find('h3').html(s.name);
+				seat.find('.stack').html(s.stack);
 			});
 		}
 		
@@ -266,13 +286,23 @@
 			return $('#seat' + i);
 		}
 		
+		function updateDealerCards(cards) {
+			var cardDivs = $('#dealer').find('.card');
+			$(cardDivs).hide();
+			
+			_.each(cards, function(c, n) {
+				$(cardDivs[n]).html(cardImg(c)).show();
+			});
+		}
+		
 		function updateCards(i, cards) {
 			var s = seat(i);
 			var cardDivs = s.find('.card');
-			console.log(cards[0].val);
-			console.log(cards[1].val);
-			$(cardDivs[0]).html(cardImg(cards[0]));
-			$(cardDivs[1]).html(cardImg(cards[1]));
+			$(cardDivs).hide();
+			
+			_.each(cards, function(c, n) {
+				$(cardDivs[n]).html(cardImg(c)).show();
+			});
 		}
 		
 		function cardImg(c) {
@@ -297,6 +327,9 @@
 		
 		function resetCards() {
 			$('div#table div.seat div.cards div.card').empty();
+			_.each($('div#table div.seat div.cards'), function(cs) {
+				$($(cs).children('.card').slice(2, 5)).hide();
+			});
 		}
 	</script>
 

@@ -5,7 +5,7 @@
 -export([start_link/0, init/1, stop/0, terminate/2]).
 -export([handle_call/3, handle_cast/2, handle_info/2]).
 
--export([join_table/2, leave_table/1, close_table/1]).
+-export([join_table/3, leave_table/1, close_table/1]).
 
 -record(state, {full_tables=[], open_tables=[]}).
 
@@ -16,8 +16,8 @@ start_link() ->
 stop() ->
 	gen_server:cast(?MODULE, stop).
 
-join_table(Pid, Name) ->
-	gen_server:call(?MODULE, {join_table, Pid, Name}).
+join_table(Pid, Name, Stack) ->
+	gen_server:call(?MODULE, {join_table, Pid, Name, Stack}).
 
 leave_table({Table, Player}) ->
 	gen_server:call(?MODULE, {leave_table, Table, Player}).
@@ -34,7 +34,7 @@ terminate(_Reason, _LoopData) ->
 	ok.
 
 %% Callbacks
-handle_call({join_table, Pid, Name}, _From, #state{open_tables=[T1|OpenTables]}=State) ->
+handle_call({join_table, Pid, Name, Stack}, _From, #state{open_tables=[T1|OpenTables]}=State) ->
 	case try_join_table({Pid, Name}, T1) of
 		{open, Table} ->
 			NewState = State#state{open_tables=[Table|OpenTables]};
@@ -48,7 +48,7 @@ handle_call({join_table, Pid, Name}, _From, #state{open_tables=[T1|OpenTables]}=
 			end
 	end,
 	{TPid, _, _} = Table,
-	{ok, Seat, GPid} = table:seat_player(TPid, {Pid, Name}),
+	{ok, Seat, GPid} = table:seat_player(TPid, {Pid, Name, Stack}),
 	{reply, {ok, TPid, GPid, Seat}, NewState};
 
 handle_call({leave_table, Table, Player}, _From, #state{open_tables=OpenTables, full_tables=FullTables}=State) ->

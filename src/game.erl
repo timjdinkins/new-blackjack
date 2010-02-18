@@ -53,6 +53,7 @@ stay(Pid, PlayerPid) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 waiting({start_hand, TablePid, Seats}, #state{timer=Timer}=State) ->
+	io:format("Game is starting a new hand.~n", []),
 	ok = notify_players(Seats, wh:enc_initial_state(Seats)),
 	ok = notify_players(Seats, wh:enc_msg("Starting a new game")),
 	send_self(1, start_betting, Timer),
@@ -180,13 +181,13 @@ dealer(play_hand, #state{timer=Timer, seats=Seats, dealer=Dealer, deck=Deck}=Sta
 finish_game(payout_hands, #state{tablepid=TablePid, seats=Seats, dealer=Dealer}=State) ->
 	case anyone_playing(Seats) of
 		yes ->
-			ok = payout_hands(Seats, Dealer);
+			{ok, NewSeats} = payout_hands(Seats, Dealer);
 		no ->
-			ok
+			NewSeats = Seats
 	end,
 	{ok, Quiters} = find_quiters(Seats),
 	table:game_complete(TablePid, [Pid || {_, Pid, _} <- Quiters]),
-	{next_state, waiting, State}.
+	{next_state, waiting, State#state{seats=NewSeats}}.
 
 handle_event(stop_game, _StateName, Timer) ->
 	{next_state, waiting, Timer};
@@ -212,7 +213,7 @@ notify_players(Players, Msg) ->
 	ok.
 
 setup_seats(Players) ->
-	SeatMaker = fun({Seat, Pid, Name}) -> {Seat, Pid, #seat{name=Name}} end,
+	SeatMaker = fun({Seat, Pid, Name, Stack}) -> {Seat, Pid, #seat{name=Name, stack=Stack}} end,
 	{ok, lists:map(SeatMaker, Players)}.
 
 initial_deal(Seats, Deck) ->
@@ -276,33 +277,38 @@ payout_hands(Seats, Dealer) ->
 
 payout_hands(N, Seats, DealerScore) ->
 	{SeatN, Pid, SeatRec} = lists:keyfind(N, 1, Seats),
+	{Bet, Stack} = {SeatRec#seat.bet, SeatRec#seat.stack},
 	Action = case bj_hand:compute(SeatRec#seat.cards) of
 						 Score when Score > 21 ->
 							 player:lost(Pid, SeatRec#seat.bet),
-						   {lost, SeatRec#seat.bet};
+						   {lost, SeatRec#seat.bet, stack - bet};
 						 Score when Score =< 21, DealerScore > 21 ->
 							player:won(Pid, SeatRec#seat.bet),
-							 {won, SeatRec#seat.bet};
+							 {won, bet, bet + stack};
 						 Score when Score == DealerScore ->
 							 player:tied(Pid),
-							 {tie, 0};
+							 {tie, 0, stack};
 						 Score when Score >= DealerScore, Score == 21 ->
 							 player:won(Pid, SeatRec#seat.bet * 2),
-							 {won, SeatRec#seat.bet * 2};
+							 {won, bet * 2, (bet * 2) + stack};
 						 Score when Score >= DealerScore ->
 							 player:won(Pid, SeatRec#seat.bet),
-							 {won, SeatRec#seat.bet};
+							 {won, bet, bet + stack};
 						 _Score ->
 							 player:lost(Pid, SeatRec#seat.bet),
-							 {lost, SeatRec#seat.bet}
+							 {lost, bet, stack - bet}
 					 end,
-	{Res, Amt} = Action,
+	{Res, Amt, NewStack} = Action,
+	
+	NewSeats = lists:keyreplace(1, SeatN, Seats, {SeatN, Pid, SeatRec#seat{stack=NewStack}}),
+	
 	notify_players(Seats, wh:enc_result([{seat, SeatN}, {result, Res}, {amt, Amt}])),
+	
 	case next_hand(N, Seats) of
 		{ok, all_hands_played} ->
-			ok;
+			{ok, NewSeats};
 		N1 ->
-			payout_hands(N1, Seats, DealerScore)
+			payout_hands(N1, NewSeats, DealerScore)
 	end.
 
 find_quiters(Seats) ->

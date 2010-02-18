@@ -31,8 +31,8 @@ terminate(_Reason, _StateName, #game{pid=Pid}) ->
 %%%%%%% Public API %%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-seat_player(Pid, Player) ->
-	gen_fsm:sync_send_event(Pid, {seat_player, Player}).
+seat_player(Pid, {PlayerPid, Name, Stack}) ->
+	gen_fsm:sync_send_event(Pid, {seat_player, {PlayerPid, Name, Stack}}).
 
 open_seats(Pid) ->
 	gen_fsm:sync_send_all_state_event(Pid, open_seats).
@@ -47,13 +47,13 @@ game_complete(Pid, Quiters) ->
 %%
 %% Player is {Pid, Name}
 %%
-empty_table({seat_player, {Pid, Name}}, _From, #game{pid=GamePid}=Game) ->
-	NewGame = Game#game{players=[{1, Pid, Name}]},
-	ok = game:start_hand(GamePid, self(), [{1, Pid, Name}]),
+empty_table({seat_player, {Pid, Name, Stack}}, _From, #game{pid=GamePid}=Game) ->
+	NewGame = Game#game{players=[{1, Pid, Name, Stack}]},
+	ok = game:start_hand(GamePid, self(), [{1, Pid, Name, Stack}]),
 	{reply, {ok, 1, GamePid}, playing, NewGame}.
 	
-playing({seat_player, {Pid, Name}}, _From, #game{pid=GamePid, players=Players}=Game) ->
-	{Seat, Ps} = add_player({Pid, Name}, Players),
+playing({seat_player, {Pid, Name, Stack}}, _From, #game{pid=GamePid, players=Players}=Game) ->
+	{Seat, Ps} = add_player({Pid, Name, Stack}, Players),
 	{reply, {ok, Seat, GamePid}, playing, Game#game{players=Ps}}.
 
 playing({game_complete, Quiters}, #game{pid=Pid, players=Players}=Game) ->
@@ -87,6 +87,7 @@ remove_quiters(Players, []) ->
 remove_quiters(Players, [Pid|Quiters]) ->
 	remove_quiters(lists:keydelete(Pid, 2, Players), Quiters).
 
-add_player({Pid, Name}, Ps) ->
+% Add the player to the list of players tuple, returning {the_seat, list_of_player_tuples}
+add_player({Pid, Name, Stack}, Ps) ->
 	[Fst|_] = lists:subtract(lists:seq(1,6), [I || {I,_} <- Ps]),
-	{Fst, lists:keysort(1, [{Fst, Pid, Name}|Ps])}.
+	{Fst, lists:keysort(1, [{Fst, Pid, Name, Stack}|Ps])}.

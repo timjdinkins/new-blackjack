@@ -5,7 +5,7 @@ body {
 div#table {
 	position: relative;
 	height: 400px;
-	width: 800px;
+	width: 900px;
 }
 div#table div.seat {
 	position: absolute;
@@ -23,19 +23,19 @@ div#table #seat1 {
 	left: 10px;
 }
 div#table #seat2 {
-	top: 150px;
+	top: 220px;
 	left: 140px;
 }
 div#table #seat3 {
-	top: 160px;
-	left: 270px;
+	top: 320px;
+	left: 170px;
 }
 div#table #seat4 {
-	top: 160px;
-	left: 400px;
+	top: 320px;
+	left: 500px;
 }
 div#table #seat5 {
-	top: 150px;
+	top: 220px;
 	left: 530px;
 }
 div#table #seat6 {
@@ -46,10 +46,12 @@ div#table #seat6 {
 div#table div.seat div.cards {
 	float: left;
 	height: 50px;
-	border: 1px solid red;
 }
-div#table div.seat div.cards div.card:first-child {
+div#table div.seat div.cards div.card {
 	margin-right: 3px;
+}
+div#table div.seat div.cards div.card:last-child {
+	margin-right: 0px;
 }
 div#table div.seat div.cards div.card {
 	width: 36px;
@@ -61,5 +63,17 @@ div#table div.seat div.money {
 	clear: left;
 	width: 100px;
 	height: 20px;
-	border: 1px solid red;
+}
+
+div#messages {
+	position: absolute;
+	top: 280px;
+	left: 200px;
+	height: 60px;
+	width: 360px;
+}
+div#messages p {
+	margin: 5px 0px;
+	padding: 0px;
+	font-size: 14px;
 }

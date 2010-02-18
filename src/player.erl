@@ -69,8 +69,8 @@ notify(Pid, Msg) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
-handle_call(join_table, _From, #state{proxy_pid=Pid, name=Name, messages=Messages}=State) ->
-	case casino:join_table(self(), Name) of
+handle_call(join_table, _From, #state{proxy_pid=Pid, name=Name, stack=Stack, messages=Messages}=State) ->
+	case casino:join_table(self(), Name, Stack) of
 		{ok, Table, Game, Seat} ->
 			{reply, {ok, Seat}, State#state{table=#table{pid=Table, seat=Seat}, game=#game{pid=Game}}};
 		{error, _Msg}  ->
