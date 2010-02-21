@@ -195,7 +195,13 @@
 		function pollServer(name) {
 			$.post('/listen', function(data) {
 				if (data) { handleResp(data) };
-				pollServer(name);
+				if (data.msgs[0].val === "unknown SID") {
+					console.log("Stopping polling, as the server doesn't recognize me!");
+					// stop polling!
+				}
+				else {
+					pollServer(name);
+				}
 			}, 'json');
 		}
 

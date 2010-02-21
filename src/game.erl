@@ -32,8 +32,7 @@ terminate(Reason, StateName, _State) ->
 %%%%%%% Public API %%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-start_hand(Pid, TablePid, Players) ->
-	{ok, Seats} = setup_seats(Players),
+start_hand(Pid, TablePid, Seats) ->
 	gen_fsm:send_event(Pid, {start_hand, TablePid, Seats}).
 
 stop_hand(Pid) ->
@@ -79,9 +78,10 @@ betting(end_betting, #state{timer=Timer, seats=Seats}=State) ->
 	
 betting({place_bet, Pid, Amt}, #state{timer=Timer, seats=Seats}=State) ->
 	{SeatN, Pid, #seat{bet=Bet}=Seat} = lists:keyfind(Pid, 2, Seats),
-	NewSeats = lists:keystore(Pid, 2, Seats, {SeatN, Pid, Seat#seat{bet=Bet + Amt}}),
+	NewSeats = lists:keystore(SeatN, 1, Seats, {SeatN, Pid, Seat#seat{bet=Bet + Amt}}),
 	case all_bets_in(NewSeats) of
-		yes   -> send_self(0, end_betting, Timer)
+		yes -> send_self(0, end_betting, Timer);
+		no  -> ok
 	end,
 	notify_players(Seats, wh:enc_update([{seat, SeatN}, {bet, Bet + Amt}])),
 	{next_state, betting, State#state{seats=NewSeats}};
@@ -185,8 +185,7 @@ finish_game(payout_hands, #state{tablepid=TablePid, seats=Seats, dealer=Dealer}=
 		no ->
 			NewSeats = Seats
 	end,
-	{ok, Quiters} = find_quiters(Seats),
-	table:game_complete(TablePid, [Pid || {_, Pid, _} <- Quiters]),
+	table:game_complete(TablePid, NewSeats),
 	{next_state, waiting, State#state{seats=NewSeats}}.
 
 handle_event(stop_game, _StateName, Timer) ->
@@ -211,10 +210,6 @@ notify_players(Players, Msg) ->
 	Notifier = fun({_S, Pid, _Seat}) -> notify(Pid, Msg) end,
 	lists:foreach(Notifier, Players),
 	ok.
-
-setup_seats(Players) ->
-	SeatMaker = fun({Seat, Pid, Name, Stack}) -> {Seat, Pid, #seat{name=Name, stack=Stack}} end,
-	{ok, lists:map(SeatMaker, Players)}.
 
 initial_deal(Seats, Deck) ->
 	initial_deal([], Seats, Deck).
@@ -281,26 +276,26 @@ payout_hands(N, Seats, DealerScore) ->
 	Action = case bj_hand:compute(SeatRec#seat.cards) of
 						 Score when Score > 21 ->
 							 player:lost(Pid, SeatRec#seat.bet),
-						   {lost, SeatRec#seat.bet, stack - bet};
+						   {lost, Bet, Stack - Bet};
 						 Score when Score =< 21, DealerScore > 21 ->
 							player:won(Pid, SeatRec#seat.bet),
-							 {won, bet, bet + stack};
+							 {won, Bet, Bet + Stack};
 						 Score when Score == DealerScore ->
 							 player:tied(Pid),
-							 {tie, 0, stack};
+							 {tie, 0, Stack};
 						 Score when Score >= DealerScore, Score == 21 ->
 							 player:won(Pid, SeatRec#seat.bet * 2),
-							 {won, bet * 2, (bet * 2) + stack};
+							 {won, Bet * 2, (Bet * 2) + Stack};
 						 Score when Score >= DealerScore ->
 							 player:won(Pid, SeatRec#seat.bet),
-							 {won, bet, bet + stack};
+							 {won, Bet, Bet + Stack};
 						 _Score ->
 							 player:lost(Pid, SeatRec#seat.bet),
-							 {lost, bet, stack - bet}
+							 {lost, Bet, Stack - Bet}
 					 end,
 	{Res, Amt, NewStack} = Action,
 	
-	NewSeats = lists:keyreplace(1, SeatN, Seats, {SeatN, Pid, SeatRec#seat{stack=NewStack}}),
+	NewSeats = lists:keyreplace(1, SeatN, Seats, {SeatN, Pid, SeatRec#seat{stack=NewStack, result=Res}}),
 	
 	notify_players(Seats, wh:enc_result([{seat, SeatN}, {result, Res}, {amt, Amt}])),
 	
@@ -310,10 +305,6 @@ payout_hands(N, Seats, DealerScore) ->
 		N1 ->
 			payout_hands(N1, NewSeats, DealerScore)
 	end.
-
-find_quiters(Seats) ->
-	Fun = fun({_Seat, _Pid, #seat{bet=Bet}}) -> Bet == 0 end,
-	{ok, lists:filter(Fun, Seats)}.
 
 everyone_busted(Seats) ->
 	Fun = fun({_Seat, _Pid, #seat{cards=Cards}}) -> 

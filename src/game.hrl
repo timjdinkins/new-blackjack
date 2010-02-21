@@ -1,1 +1,1 @@
--record(seat, {name, cards, stack, bet=0}).
+-record(seat, {name, cards, stack, bet=0, result}).

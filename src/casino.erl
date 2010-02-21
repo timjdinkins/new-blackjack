@@ -53,12 +53,12 @@ handle_call({join_table, Pid, Name, Stack}, _From, #state{open_tables=[T1|OpenTa
 
 handle_call({leave_table, Table, Player}, _From, #state{open_tables=OpenTables, full_tables=FullTables}=State) ->
 	case leave_table(Table, Player, OpenTables) of
-		{ok, NewTables} ->
-			{reply, ok, #state{open_tables=NewTables}};
+		{ok, T2, NewTables} ->
+			{reply, ok, #state{open_tables=[T2 | NewTables]}};
 		no_match ->
 			case leave_table(Table, Player, FullTables) of
-				{ok, NewTables} ->
-					{reply, ok, #state{full_tables=NewTables}};
+				{ok, T2, NewTables} ->
+					{reply, ok, #state{open_tables=[T2 | OpenTables], full_tables=NewTables}};
 				no_match ->
 					{reply, {error, no_match}, State}
 			end
@@ -95,7 +95,7 @@ leave_table(TablePid, Player, Tables) ->
 	case lists:keyfind(TablePid, 1, Tables) of
 		{Pid, Cnt, Players} ->
 			NPlayers = lists:delete(Player, Players),
-			{ok, lists:keyreplace(TablePid, 1, Tables, {Pid, Cnt -1, NPlayers})};
+			{ok, {Pid, Cnt -1, NPlayers}, lists:keydelete(TablePid, 1, Tables)};
 		_ ->
 			no_match
 	end.

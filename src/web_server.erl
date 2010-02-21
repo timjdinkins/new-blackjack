@@ -45,7 +45,7 @@ handle_action("register", Req) ->
 	Name = wh:get_param(Req, "name"),
 	% This is busted.  The cookie code can't handle the hash as it
 	% wants it escaped.
-	SID = wh:generate_sid(Name, IP),
+	SID = Name ++ wh:generate_sid(Name, IP),
 	Cookie = mochiweb_cookies:cookie("sid", SID, [{path, "/"}]),
 	io:format("Cookie: ~p~n", [Cookie]),
 	
@@ -62,7 +62,7 @@ handle_action("listen", Req) ->
 			timer:send_after(30000, self(), timeout),
 			listen(Req, Pid);
 		{error, Reason} ->
-			json_error(Req, Reason)
+			json_error(Req, wh:enc_error(Reason))
 	end;
 
 handle_action("action", Req) ->

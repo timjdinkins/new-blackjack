@@ -35,6 +35,7 @@ get_pid(SID) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 handle_call({register, SID, Name}, _From, State) ->
+	io:format("Registering ~p~n", [SID]),
 	case already_registered(SID, Name, State) of
 		yes ->
 			{reply, {error, "already_registered"}, State};
@@ -48,7 +49,7 @@ handle_call({get_pid, SID}, _From, State) ->
 		{SID, _Name, Pid} ->
 			{reply, {ok, Pid}, State};
 		false ->
-			{reply, {error, name_not_found}, State}
+			{reply, {error, "unknown SID"}, State}
 	end;
 
 handle_call(Unknown, _From, State) ->
