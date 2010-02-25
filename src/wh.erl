@@ -74,7 +74,7 @@ enc_msg(Str, Ms) ->
 % These messages are broadcast to all players at the table so they can all see what
 % the dealer is saying to a player.
 enc_dealer_msg(Seat, Str) ->
-	[{obj, [{type, <<"dealer-msg">>}, {seat, Seat}, {val, ltb(Str)}]}].
+	[{obj, [{type, <<"dealer_msg">>}, {seat, Seat}, {val, ltb(Str)}]}].
 
 enc_error(Str) ->
 	[{obj, [{type, <<"error">>}, {val, ltb(Str)}]}].

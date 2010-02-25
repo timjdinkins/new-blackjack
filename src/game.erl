@@ -123,6 +123,7 @@ playing_hands({stay, Pid}, #state{timer=Timer, seats=Seats, hand=SeatN}=State) -
 	% Make sure the correct player is playing
 	case lists:keyfind(Pid, 2, Seats) of
 		{SeatN, Pid, _} ->
+			notify_players(Seats, wh:enc_dealer_msg(SeatN, " staying")),
 			notify_players(Seats, wh:enc_update([{seat, SeatN}, {action, <<"stay">>}])),
 			send_self(2, next_hand, Timer);
 		_ ->
@@ -143,12 +144,13 @@ playing_hands({hit, Pid}, #state{timer=Timer, seats=Seats, hand=SeatN, deck=Deck
 					player:new_cards(Pid, NewCards, Score),
 					player:busted(Pid, NewCards, Score),
 					notify_players(Seats, wh:enc_update([{seat, SeatN}, {action, <<"busted">>}])),
-					send_self(2, next_hand, Timer),
+					notify_players(Seats, wh:enc_update([{seat, SeatN}, {cards, wh:json_cards(NewCards)}, {score, Score}])),
+					send_self(1, next_hand, Timer),
 					NewState = State#state{seats=NewSeats, deck=NewDeck};
 				Score ->
 					player:new_cards(Pid, NewCards, Score),
 					notify_players(Seats, wh:enc_update([{seat, SeatN}, {cards, wh:json_cards(NewCards)}, {score, Score}])),
-					notify(Pid, wh:enc_msg("Hit or stay?")),
+					notify_players(Seats, wh:enc_dealer_msg(SeatN, "Hit or stay?")),
 					send_self(30, next_hand, Timer),
 					NewState = State#state{seats=NewSeats, deck=NewDeck}
 			end,
@@ -297,12 +299,18 @@ payout_hands(N, Seats, DealerScore) ->
 	
 	NewSeats = lists:keyreplace(1, SeatN, Seats, {SeatN, Pid, SeatRec#seat{stack=NewStack, result=Res}}),
 	
-	notify_players(Seats, wh:enc_result([{seat, SeatN}, {result, Res}, {amt, Amt}])),
+	Msg = case Res of
+					won -> "You won " ++ integer_to_list(Amt);
+					lost -> "You lost " ++ integer_to_list(Amt);
+					tie -> "You tied"
+				end,
+	notify_players(Seats, wh:enc_dealer_msg(SeatN, Msg)),
 	
 	case next_hand(N, Seats) of
 		{ok, all_hands_played} ->
 			{ok, NewSeats};
 		N1 ->
+			timer:sleep(2000),
 			payout_hands(N1, NewSeats, DealerScore)
 	end.
 

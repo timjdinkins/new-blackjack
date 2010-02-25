@@ -216,7 +216,7 @@
 						if (m.val == "Starting a new game") {
 							resetCards();
 						}
-						else if (m.val != 'ok') {
+						else if (m.val !== 'ok' && m.val !== 'reconnect') {
 							appendMsg(m.val);
 						}
 					}
@@ -225,6 +225,9 @@
 					}
 					else if (m.type === "initial_state") {
 						initializeGame(m.seats);
+					}
+					else if (m.type === 'dealer_msg') {
+						appendMsg("Seat " + m.seat + ", " + m.val);
 					}
 					else if (m.type === "table_update") {
 						if (m.seat) {
@@ -254,9 +257,6 @@
 						else if (m.result === "tie") {
 							appendMsg("It's a tie");
 						}
-						if (m.stack) {
-							$('#stack').html('$' + m.stack);
-						}
 					}
 				});
 			}
@@ -281,6 +281,7 @@
 				var seat = $('#seat' + s.seat);
 				seat.find('h3').html(s.name);
 				seat.find('.stack').html(s.stack);
+				seat.find('.bet').html("-");
 			});
 		}
 		
@@ -333,6 +334,7 @@
 		
 		function resetCards() {
 			$('div#table div.seat div.cards div.card').empty();
+			
 			_.each($('div#table div.seat div.cards'), function(cs) {
 				$($(cs).children('.card').slice(2, 5)).hide();
 			});

@@ -29,16 +29,24 @@ dispatch_request(Req, DocRoot) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%% Main Loop %%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
-listen(Req, Pid) ->
+listen(Req, Pid, TRef) ->
 	player:register_proxy(Pid, self()),
+	io:format("Registered listener ~p.~n", [self()]),
 	receive
-		timeout -> json_ok(Req, {action, "reconnect"});
 		{'$gen_cast', Msgs} ->
+			io:format("Sending message: ~p~n", [Msgs]),
 			json_ok(Req, Msgs);
+		{error, socket_closed} ->
+			% The web browser closes or goes to a different page.
+			ok;
+		timeout ->
+			io:format("Timed out ~p.~n", [self()]),
+			json_ok(Req, wh:enc_msg("reconnect"));
 		Any ->
 			io:format("Unknown message: ~p~n", [Any]),
 			json_ok(Req, wh:enc_msg(Any))
-	end.
+	end,
+	timer:cancel(TRef).
 
 handle_action("register", Req) ->
 	IP = Req:get_header_value("host"),
@@ -59,8 +67,8 @@ handle_action("listen", Req) ->
 	SID = Req:get_cookie_value("sid"),
 	case registry:get_pid(SID) of
 		{ok, Pid} ->
-			timer:send_after(30000, self(), timeout),
-			listen(Req, Pid);
+			{ok, TRef} = timer:send_after(30000, self(), timeout),
+			listen(Req, Pid, TRef);
 		{error, Reason} ->
 			json_error(Req, wh:enc_error(Reason))
 	end;
