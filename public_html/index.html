@@ -5,7 +5,7 @@
 <head>
 	<meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
 	<title>Play BlackJack</title>
-	<link rel="stylesheet" href="/stylesheets/default.css" type="text/css" /
+	<link rel="stylesheet" href="/stylesheets/default.css" type="text/css" />
 	<script type="text/javascript" src="/javascripts/jquery-1.4.1.min.js"></script>
 	<script type="text/javascript" src="/javascripts/underscore-min.js"></script>
 </head>
@@ -142,6 +142,7 @@
 	
 	<script type="text/javascript" charset="utf-8">
 		var Game = {name: null, mySeat: null, resps: []};
+
 		$(function() {
 			
 			resetCards();
@@ -184,7 +185,6 @@
 		function register(name) {
 			Game.name = name;
 			$.post('/register', {name: name}, function(data) {
-					console.log(data.msgs[0].val);
 					pollServer(name);
 					$.post('/action', {a: 'join_table'}, function(data) {
 						if (data && data.msgs) { handleResp(data) }
@@ -196,7 +196,6 @@
 			$.post('/listen', function(data) {
 				if (data) { handleResp(data) };
 				if (data.msgs[0].val === "unknown SID") {
-					console.log("Stopping polling, as the server doesn't recognize me!");
 					// stop polling!
 				}
 				else {

@@ -52,7 +52,7 @@ stay(Pid, PlayerPid) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 waiting({start_hand, TablePid, Seats}, #state{timer=Timer}=State) ->
-	io:format("Game is starting a new hand.~n", []),
+	% io:format("Game is starting a new hand.~n", []),
 	ok = notify_players(Seats, wh:enc_initial_state(Seats)),
 	ok = notify_players(Seats, wh:enc_msg("Starting a new game")),
 	send_self(1, start_betting, Timer),
@@ -277,27 +277,27 @@ payout_hands(N, Seats, DealerScore) ->
 	{Bet, Stack} = {SeatRec#seat.bet, SeatRec#seat.stack},
 	Action = case bj_hand:compute(SeatRec#seat.cards) of
 						 Score when Score > 21 ->
-							 player:lost(Pid, SeatRec#seat.bet),
+							 player:lost(Pid, Bet),
 						   {lost, Bet, Stack - Bet};
 						 Score when Score =< 21, DealerScore > 21 ->
-							player:won(Pid, SeatRec#seat.bet),
+							player:won(Pid, Bet),
 							 {won, Bet, Bet + Stack};
 						 Score when Score == DealerScore ->
 							 player:tied(Pid),
 							 {tie, 0, Stack};
 						 Score when Score >= DealerScore, Score == 21 ->
-							 player:won(Pid, SeatRec#seat.bet * 2),
+							 player:won(Pid, Bet * 2),
 							 {won, Bet * 2, (Bet * 2) + Stack};
 						 Score when Score >= DealerScore ->
-							 player:won(Pid, SeatRec#seat.bet),
+							 player:won(Pid, Bet),
 							 {won, Bet, Bet + Stack};
 						 _Score ->
-							 player:lost(Pid, SeatRec#seat.bet),
+							 player:lost(Pid, Bet),
 							 {lost, Bet, Stack - Bet}
 					 end,
 	{Res, Amt, NewStack} = Action,
 	
-	NewSeats = lists:keyreplace(1, SeatN, Seats, {SeatN, Pid, SeatRec#seat{stack=NewStack, result=Res}}),
+	NewSeats = lists:keyreplace(SeatN, 1, Seats, {SeatN, Pid, SeatRec#seat{stack=NewStack, result=Res}}),
 	
 	Msg = case Res of
 					won -> "You won " ++ integer_to_list(Amt);
@@ -306,7 +306,7 @@ payout_hands(N, Seats, DealerScore) ->
 				end,
 	notify_players(Seats, wh:enc_dealer_msg(SeatN, Msg)),
 	
-	case next_hand(N, Seats) of
+	case next_hand(N, NewSeats) of
 		{ok, all_hands_played} ->
 			{ok, NewSeats};
 		N1 ->

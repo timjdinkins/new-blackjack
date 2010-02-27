@@ -62,12 +62,13 @@ playing({seat_player, {Pid, Name, Stack}}, _From, #game{pid=GamePid, seats=Seats
 
 playing({game_complete, Seats}, #game{pid=Pid, new_players=NewPlayers}=Game) ->
 	{NSeats, Quiters} = players_and_quiters(Seats),
+	lists:foreach(fun({FSn, _Fp, FSeat}) -> io:format("Seat: ~p, Stack: ~p~n", [FSn, FSeat#seat.stack]) end, NSeats),
 	ok = quit_table(Quiters),
 	NNSeats = lists:keysort(1, NSeats ++ NewPlayers),
-	NewSeats = [{SN, P, Seat#seat{bet=0, cards=[]}} || {SN, P, #seat{}=Seat} <- NNSeats],
+	NewSeats = [{SN, P, Seat#seat{bet=0, cards=[]}} || {SN, P, Seat} <- NNSeats],
+	lists:foreach(fun({FSn, _Fp, FSeat}) -> io:format("Seat: ~p, Stack: ~p~n", [FSn, FSeat#seat.stack]) end, NewSeats),
 	case length(NewSeats) of
 		L when L > 0 ->
-			io:format("Table starting a new game with ~p players.~n", [L]),
 			ok = game:start_hand(Pid, self(), NewSeats),
 			{next_state, playing, Game#game{seats=NewSeats, new_players=[]}};
 		_Else ->

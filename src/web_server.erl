@@ -1,7 +1,6 @@
 -module(web_server).
 
 -export([start/0, start/1, stop/0, dispatch_request/2]).
--export([test/0]).
 
 start() ->
 	start(9000).
@@ -31,19 +30,19 @@ dispatch_request(Req, DocRoot) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 listen(Req, Pid, TRef) ->
 	player:register_proxy(Pid, self()),
-	io:format("Registered listener ~p.~n", [self()]),
+	% io:format("Registered listener ~p.~n", [self()]),
 	receive
 		{'$gen_cast', Msgs} ->
-			io:format("Sending message: ~p~n", [Msgs]),
+			% io:format("Sending message: ~p~n", [Msgs]),
 			json_ok(Req, Msgs);
 		{error, socket_closed} ->
 			% The web browser closes or goes to a different page.
 			ok;
 		timeout ->
-			io:format("Timed out ~p.~n", [self()]),
+			% io:format("Timed out ~p.~n", [self()]),
 			json_ok(Req, wh:enc_msg("reconnect"));
 		Any ->
-			io:format("Unknown message: ~p~n", [Any]),
+			% io:format("Unknown message: ~p~n", [Any]),
 			json_ok(Req, wh:enc_msg(Any))
 	end,
 	timer:cancel(TRef).
@@ -55,7 +54,7 @@ handle_action("register", Req) ->
 	% wants it escaped.
 	SID = Name ++ wh:generate_sid(Name, IP),
 	Cookie = mochiweb_cookies:cookie("sid", SID, [{path, "/"}]),
-	io:format("Cookie: ~p~n", [Cookie]),
+	% io:format("Cookie: ~p~n", [Cookie]),
 	
 	case registry:register_player(SID, Name) of
 		{ok, _Pid} ->
@@ -76,7 +75,7 @@ handle_action("listen", Req) ->
 handle_action("action", Req) ->
 	SID = Req:get_cookie_value("sid"),
 	Action = wh:get_param(Req, "a"),
-	io:format("Action request for: ~p -> ~p~n", [SID, Action]),
+	% io:format("Action request for: ~p -> ~p~n", [SID, Action]),
 	case registry:get_pid(SID) of
 		{ok, Pid} ->
 			case Action of
@@ -106,7 +105,7 @@ join_table(Pid, _Req) ->
 
 bet(Pid, Req) ->
 	Amt = wh:get_param(Req, "amt"),
-	io:format("Bet of: ~p~n", [Amt]),
+	% io:format("Bet of: ~p~n", [Amt]),
 	player:bet(Pid, list_to_integer(Amt)).
 
 hit(Pid, _Req) ->
@@ -123,12 +122,5 @@ json_respond(Req, Status, Msgs) -> Req:ok({"text/json", [], json_msg(Status, Msg
 
 json_msg(Status, Msgs) ->
 	Ret = lists:flatten(rfc4627:encode({obj, [{status, Status}, {msgs, Msgs}]})),
-	io:format("JSON-Msg: ~p~n", [Ret]),
+	% io:format("JSON-Msg: ~p~n", [Ret]),
 	Ret.
-
-test() ->
-	Ms = wh:enc_msg("Start the DAMN GAME!", []),
-	NMs = wh:enc_msg("Run for it!", Ms),
-	NNMs = wh:enc_bust(29, NMs),
-	V = json_msg(<<"ok">>, NNMs),
-	io:format("Out -> ~p~n", [V]).
