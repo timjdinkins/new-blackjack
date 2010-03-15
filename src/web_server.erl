@@ -1,6 +1,7 @@
 -module(web_server).
 
 -export([start/0, start/1, stop/0, dispatch_request/2]).
+-export([json_msg/2]).
 
 start() ->
 	start(9000).
@@ -30,36 +31,30 @@ dispatch_request(Req, DocRoot) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 listen(Req, Pid, TRef) ->
 	player:register_proxy(Pid, self()),
-	% io:format("Registered listener ~p.~n", [self()]),
 	receive
 		{'$gen_cast', Msgs} ->
-			% io:format("Sending message: ~p~n", [Msgs]),
+			io:format("Msg to client: ~p~n", [Msgs]),
 			json_ok(Req, Msgs);
-		{error, socket_closed} ->
-			% The web browser closes or goes to a different page.
+		{error, socket_closed} -> % The web browser closes or goes to a different page.
 			ok;
 		timeout ->
-			% io:format("Timed out ~p.~n", [self()]),
-			json_ok(Req, wh:enc_msg("reconnect"));
-		Any ->
-			% io:format("Unknown message: ~p~n", [Any]),
-			json_ok(Req, wh:enc_msg(Any))
+			ok(Req)
 	end,
 	timer:cancel(TRef).
 
 handle_action("register", Req) ->
 	IP = Req:get_header_value("host"),
 	Name = wh:get_param(Req, "name"),
-	% This is busted.  The cookie code can't handle the hash as it
-	% wants it escaped.
-	SID = Name ++ wh:generate_sid(Name, IP),
+	SID = wh:generate_sid(Name, IP),
 	Cookie = mochiweb_cookies:cookie("sid", SID, [{path, "/"}]),
-	% io:format("Cookie: ~p~n", [Cookie]),
+	io:format("Cookie: ~p~n", [Cookie]),
 	
 	case registry:register_player(SID, Name) of
 		{ok, _Pid} ->
-			Req:ok({"text/json", [Cookie], json_msg(<<"ok">>, wh:enc_msg("registered"))});
-		{error, Reason} -> json_ok(Req, wh:enc_error(Reason, []))
+			io:format("Sending response...", []),
+			Req:ok({"text/json", [Cookie], []});
+		{error, Reason} ->
+			json_ok(Req, wh:enc(error, {reason, Reason}))
 	end;
 
 handle_action("listen", Req) ->
@@ -69,31 +64,31 @@ handle_action("listen", Req) ->
 			{ok, TRef} = timer:send_after(30000, self(), timeout),
 			listen(Req, Pid, TRef);
 		{error, Reason} ->
-			json_error(Req, wh:enc_error(Reason))
+			json_error(Req, wh:enc(error, {reason, Reason}))
 	end;
 
 handle_action("action", Req) ->
 	SID = Req:get_cookie_value("sid"),
 	Action = wh:get_param(Req, "a"),
-	% io:format("Action request for: ~p -> ~p~n", [SID, Action]),
 	case registry:get_pid(SID) of
 		{ok, Pid} ->
 			case Action of
 				"join_table" ->
 					{ok, Seat} = join_table(Pid, Req),
-					json_ok(Req, wh:enc_registered(Seat));
+					io:format("Responding to Join Table with Seat: ~p~n", [Seat]),
+					json_ok(Req, wh:enc(reg, {seat, Seat}));
 				"bet" ->
 					bet(Pid, Req),
-					json_ok(Req, wh:enc_msg("ok"));
+					ok(Req);
 				"hit" ->
 					hit(Pid, Req),
-					json_ok(Req, wh:enc_msg("ok"));
+					ok(Req);
 				"stay" ->
 					stay(Pid, Req),
-					json_ok(Req, wh:enc_msg("ok"))
+					ok(Req)
 			end;
 		{error, Reason} ->
-			json_error(Req, wh:enc_error(Reason))
+			json_error(Req, wh:enc(error, {reason, Reason}))
 	end.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -105,7 +100,6 @@ join_table(Pid, _Req) ->
 
 bet(Pid, Req) ->
 	Amt = wh:get_param(Req, "amt"),
-	% io:format("Bet of: ~p~n", [Amt]),
 	player:bet(Pid, list_to_integer(Amt)).
 
 hit(Pid, _Req) ->
@@ -113,6 +107,8 @@ hit(Pid, _Req) ->
 
 stay(Pid, _Req) ->
 	player:stay(Pid).
+	
+ok(Req) -> Req:ok({"text/json", [], []}).
 
 json_ok(Req, Msgs) -> json_respond(Req, <<"ok">>, Msgs).
 
@@ -121,6 +117,6 @@ json_error(Req, Msgs) -> json_respond(Req, <<"error">>, Msgs).
 json_respond(Req, Status, Msgs) -> Req:ok({"text/json", [], json_msg(Status, Msgs)}).
 
 json_msg(Status, Msgs) ->
-	Ret = lists:flatten(rfc4627:encode({obj, [{status, Status}, {msgs, Msgs}]})),
+	Ret = mochijson2:encode({struct, [{status, Status}, {msgs, Msgs}]}),
 	% io:format("JSON-Msg: ~p~n", [Ret]),
 	Ret.

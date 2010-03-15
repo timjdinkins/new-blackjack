@@ -152,6 +152,16 @@
 				return false;
 			});
 			
+			function register(name) {
+				Game.name = name;
+				$.post('/register', {name: name}, function(data) {
+						pollServer(name);
+						$.post('/action', {a: 'join_table'}, function(data) {
+							if (data && data.msgs) { handleResp(data) }
+						}, 'json');
+					}, 'json');
+			}
+			
 			$('#actions input').each(function() {
 				$(this).click(function() {
 					var ps = $(this).attr('name').split('-');
@@ -182,54 +192,33 @@
 			$.post('/action', {a: 'stay'}, function(data) {}, 'json');
 		}
 
-		function register(name) {
-			Game.name = name;
-			$.post('/register', {name: name}, function(data) {
-					pollServer(name);
-					$.post('/action', {a: 'join_table'}, function(data) {
-						if (data && data.msgs) { handleResp(data) }
-					}, 'json');
-				}, 'json');
-		}
-
 		function pollServer(name) {
 			$.post('/listen', function(data) {
 				if (data) { handleResp(data) };
-				if (data.msgs[0].val === "unknown SID") {
-					// stop polling!
-				}
-				else {
-					pollServer(name);
-				}
+				pollServer(name);
 			}, 'json');
 		}
 
 		function handleResp(data) {
-			Game.resps.push(data);
 			if (data.msgs.length) {
 				_.each(data.msgs, function(m) {
-					if (m.type === "registered") {
-						Game.mySeat = m.seat;
-					}
-					else if (m.type === "msg") {
-						if (m.val == "Starting a new game") {
-							resetCards();
-						}
-						else if (m.val !== 'ok' && m.val !== 'reconnect') {
-							appendMsg(m.val);
-						}
-					}
-					else if (m.type === "error") {
-						appendMsg("Error: " + m.val);
-					}
-					else if (m.type === "initial_state") {
-						initializeGame(m.seats);
-					}
-					else if (m.type === 'dealer_msg') {
-						appendMsg("Seat " + m.seat + ", " + m.val);
-					}
-					else if (m.type === "table_update") {
+					//
+					// Registration fu
+					//
+					if (m.type === "reg") { // registration response
 						if (m.seat) {
+							Game.mySeat = m.seat;
+						}
+					}
+					//
+					// State fu
+					//
+					else if (m.type === "state") {
+						if (m.table && m.table === 'reset') {
+							resetCards();
+							initializeGame(m.seats);
+						}
+						else if (m.seat) { // targeted at a seat
 							if (m.seat === "dealer") {
 								updateDealerCards(m.cards);
 							}
@@ -237,24 +226,33 @@
 								if (m.bet) {
 									seat(m.seat).find('.bet').html(m.bet);
 								}
+								else if (m.stack) {
+									seat(m.seat).find('.stack').html(m.stack);
+								}
 								else if (m.cards) {
 									updateCards(m.seat, m.cards);
 								}
+								else {
+									console.log("nothing worked");
+								}
 							}
 						}
-						else if (m.bet) {
-							appendMsg("Seat: " + m.seat + " bet " + m.bet);
-						}
 					}
-					else if (m.type === "bust") {
-						appendMsg("Busted with a score of: " + m.score);
-					}
-					else if (m.type === "result") {
-						if (m.result === "won" || m.result === "lost") {
-							appendMsg("You " + m.result + " " + m.amt);
+					//
+					// Display fu (messages displayed to the user)
+					//
+					else if (m.type === "display") {
+						if (m.table) {
+							appendMsg(m.txt_key);
 						}
-						else if (m.result === "tie") {
-							appendMsg("It's a tie");
+						else if (m.seat) {
+							if (m.txt_key === 'won' || m.txt_key === 'lost' || m.txt_key === 'tie') {
+								appendTargetedMsg(m.seat, m.txt_key + " " + m.amt);
+							}
+							else {
+								appendTargetedMsg(m.seat, m.txt_key);
+							}
+
 						}
 					}
 				});
@@ -273,6 +271,10 @@
 			_.each(Q, function(m) {
 				$('#messages').append('<p>' + m + '</p>');
 			});
+		}
+		
+		function appendTargetedMsg(seat, msg) {
+			appendMsg("Seat " + seat + ", " + msg);
 		}
 		
 		function initializeGame(ss) {
@@ -302,6 +304,7 @@
 		}
 		
 		function updateCards(i, cards) {
+			console.log("updating cards");
 			var s = seat(i);
 			var cardDivs = s.find('.card');
 			$(cardDivs).hide();

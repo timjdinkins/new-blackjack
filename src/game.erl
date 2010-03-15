@@ -52,26 +52,23 @@ stay(Pid, PlayerPid) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 waiting({start_hand, TablePid, Seats}, #state{timer=Timer}=State) ->
-	% io:format("Game is starting a new hand.~n", []),
 	ok = notify_players(Seats, wh:enc_initial_state(Seats)),
-	ok = notify_players(Seats, wh:enc_msg("Starting a new game")),
+	ok = notify_players(Seats, wh:enc(display, [{table, true}, {txt_key, new_game}])),
 	send_self(1, start_betting, Timer),
 	{next_state, betting, State#state{tablepid=TablePid, seats=Seats, deck=deck:shuffled()}}.
 
 betting(start_betting, #state{timer=Timer, seats=Seats}=State) ->
-	ok = notify_players(Seats, wh:enc_msg("Place your bets")),
+	ok = notify_players(Seats, wh:enc(display, [{table, true}, {txt_key, place_bets}])),
 	send_self(30, end_betting, Timer),
 	{next_state, betting, State};
 
 betting(end_betting, #state{timer=Timer, seats=Seats}=State) ->
-	ok = notify_players(Seats, wh:enc_msg("Betting is closed.")),
+	ok = notify_players(Seats, wh:enc(display, [{table, true}, {txt_key, betting_closed}])),
 	case anyone_playing(Seats) of
 		yes ->
-			ok = notify_players(Seats, wh:enc_msg("Dealing hands.")),
 			send_self(2, start_dealing, Timer),
 			{next_state, dealing, State};
 		no  ->
-			ok = notify_players(Seats, wh:enc_msg("No one wants to play.  Damn you!")),
 			send_self(2, payout_hands, Timer),
 			{next_state, finish_game, State}
 	end;
@@ -83,7 +80,7 @@ betting({place_bet, Pid, Amt}, #state{timer=Timer, seats=Seats}=State) ->
 		yes -> send_self(0, end_betting, Timer);
 		no  -> ok
 	end,
-	notify_players(Seats, wh:enc_update([{seat, SeatN}, {bet, Bet + Amt}])),
+	notify_players(Seats, wh:enc(state, [{seat, SeatN}, {bet, Bet + Amt}])),
 	{next_state, betting, State#state{seats=NewSeats}};
 
 betting(Any, State) ->
@@ -97,7 +94,11 @@ dealing(start_dealing, #state{timer=Timer, seats=Seats, deck=Deck}=State) ->
 	%% This will deal the cards and inform the users of their hands
 	{ok, NewSeats, Dealer, NewDeck} = initial_deal(Seats, Deck),
 	send_self(2, play_hand, Timer),
-	{next_state, playing_hands, State#state{seats=NewSeats, dealer=Dealer, deck=NewDeck, hand=next_hand(0, Seats)}}.
+	{next_state, playing_hands, State#state{seats=NewSeats, dealer=Dealer, deck=NewDeck, hand=next_hand(0, Seats)}};
+
+dealing(Any, State) ->
+	io:format("Unhandled message: ~p~n", [Any]),
+	{next_state, dealing, State}.
 
 %% If we have played through all 6 hands, move on to the dealer.
 playing_hands(play_hand, #state{timer=Timer, hand=Hand}=State) when Hand > 6 ->
@@ -105,7 +106,7 @@ playing_hands(play_hand, #state{timer=Timer, hand=Hand}=State) when Hand > 6 ->
 	{next_state, dealer, State};
 
 playing_hands(play_hand, #state{timer=Timer, seats=Seats, hand=Hand}=State) ->
-	notify_players(Seats, wh:enc_dealer_msg(Hand, "Hit or stay?")),
+	notify_players(Seats, wh:enc(display, [{seat, Hand}, {txt_key, hit_or_stay}])),
 	send_self(30, next_hand, Timer),
 	{next_state, playing_hands, State};
 
@@ -123,11 +124,10 @@ playing_hands({stay, Pid}, #state{timer=Timer, seats=Seats, hand=SeatN}=State) -
 	% Make sure the correct player is playing
 	case lists:keyfind(Pid, 2, Seats) of
 		{SeatN, Pid, _} ->
-			notify_players(Seats, wh:enc_dealer_msg(SeatN, " staying")),
-			notify_players(Seats, wh:enc_update([{seat, SeatN}, {action, <<"stay">>}])),
+			notify_players(Seats, wh:enc(display, [{seat, SeatN}, {txt_key, staying}])),
 			send_self(2, next_hand, Timer);
 		_ ->
-			notify(Pid, {msg, "Sorry, it's not your turn."})
+			notify(Pid, wh:enc(display, {seat}))
 	end,
 	{next_state, playing_hands, State};
 
@@ -141,22 +141,19 @@ playing_hands({hit, Pid}, #state{timer=Timer, seats=Seats, hand=SeatN, deck=Deck
 			% Compute the hand
 			case bj_hand:compute(NewCards) of
 				Score when Score > 21 ->
-					player:new_cards(Pid, NewCards, Score),
-					player:busted(Pid, NewCards, Score),
-					notify_players(Seats, wh:enc_update([{seat, SeatN}, {action, <<"busted">>}])),
-					notify_players(Seats, wh:enc_update([{seat, SeatN}, {cards, wh:json_cards(NewCards)}, {score, Score}])),
+					notify_players(Seats, wh:enc(state, [{seat, SeatN}, {cards, NewCards}])),
+					notify_players(Seats, wh:enc(display, [{seat, SeatN}, {txt_key, busted}])),
 					send_self(1, next_hand, Timer),
 					NewState = State#state{seats=NewSeats, deck=NewDeck};
 				Score ->
-					player:new_cards(Pid, NewCards, Score),
-					notify_players(Seats, wh:enc_update([{seat, SeatN}, {cards, wh:json_cards(NewCards)}, {score, Score}])),
-					notify_players(Seats, wh:enc_dealer_msg(SeatN, "Hit or stay?")),
+					notify_players(Seats, wh:enc(state, [{seat, SeatN}, {cards, NewCards}])),
+					notify_players(Seats, wh:enc(display, [{seat, SeatN}, {txt_key, hit_or_stay}])),
 					send_self(30, next_hand, Timer),
 					NewState = State#state{seats=NewSeats, deck=NewDeck}
 			end,
 			{next_state, playing_hands, NewState};
 		_ ->
-			notify(Pid, wh:enc_msg("Sorry, it's not your turn.")),
+			notify(Pid, wh:enc(display, [{seat, SeatN}, {txt_key, not_your_turn}])),
 			{next_state, playing_hands, State}
 	end;
 
@@ -173,9 +170,9 @@ dealer(play_hand, #state{timer=Timer, seats=Seats, dealer=Dealer, deck=Deck}=Sta
 			{next_state, finish_game, State};
 		_Else ->
 			Cards = Dealer#seat.cards,
-			notify_players(Seats, wh:enc_update([{seat, <<"dealer">>}, {cards, wh:json_cards(Cards)}])),
+			notify_players(Seats, wh:enc(state, [{seat, dealer}, {cards, Cards}])),
 			{ok, NewDeck, NewCards} = play_dealer_hand(Deck, Cards),
-			notify_players(Seats, wh:enc_update([{seat, <<"dealer">>}, {cards, wh:json_cards(NewCards)}, {score, bj_hand:compute(NewCards)}])),
+			notify_players(Seats, wh:enc(state, [{seat, dealer}, {cards, NewCards}])),
 			send_self(2, payout_hands, Timer),
 			{next_state, finish_game, State#state{dealer=Dealer#seat{cards=NewCards}, deck=NewDeck}}
 	end.
@@ -220,7 +217,7 @@ initial_deal(Consumed, [], Deck) ->
 	{ok, Cards, NewDeck} = deck:draw(2, Deck), % The dealers hand
 	Seats = lists:reverse(Consumed),
 	Pred = fun({S, _P, Seat}) ->
-		wh:enc_update([{seat, S}, {cards, wh:json_cards(Seat#seat.cards)}])
+		wh:enc(state, [{seat, S}, {cards, Seat#seat.cards}])
 	end,
 	notify_players(Seats, lists:map(Pred, Seats)),
 	{ok, Seats, #seat{cards=Cards}, NewDeck};
@@ -300,11 +297,12 @@ payout_hands(N, Seats, DealerScore) ->
 	NewSeats = lists:keyreplace(SeatN, 1, Seats, {SeatN, Pid, SeatRec#seat{stack=NewStack, result=Res}}),
 	
 	Msg = case Res of
-					won -> "You won " ++ integer_to_list(Amt);
-					lost -> "You lost " ++ integer_to_list(Amt);
-					tie -> "You tied"
+					won -> {won, Amt};
+					lost -> {lost, Amt};
+					tie -> {tied, 0}
 				end,
-	notify_players(Seats, wh:enc_dealer_msg(SeatN, Msg)),
+	notify_players(Seats, wh:enc(state, [{seat, SeatN}, Msg])),
+	notify_players(Seats, wh:enc(display, [{seat, SeatN}, {txt_key, Res}, {amt, Amt}])),
 	
 	case next_hand(N, NewSeats) of
 		{ok, all_hands_played} ->
