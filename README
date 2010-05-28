@@ -1,0 +1,5 @@
+To compile the code:
+rake
+
+To run the game:
+erl -pa ebin -s crypto -s blackjack
